@@ -178,7 +178,15 @@
   'use strict';
   // Base-path agnostic: resolve everything relative to this page's directory,
   // so it works at http://host:8091/ AND https://host/conjure/ .
-  var BASE = location.pathname.replace(/[^/]*$/, ''); // e.g. "/" or "/conjure/"
+  // e.g. "/" or "/conjure/". Handle a prefix mount reached without a trailing
+  // slash (".../conjure"): treat a dot-less last segment as a directory so
+  // relative asset/fetch/WS URLs stay inside the mount.
+  var BASE = (function(){
+    var p = location.pathname;
+    if (p.charAt(p.length - 1) === '/') return p;
+    var last = p.split('/').pop();
+    return last.indexOf('.') === -1 ? p + '/' : p.replace(/[^/]*$/, '');
+  })();
   var api = function(p){ return BASE + p; };
 
   var preview = document.getElementById('preview');

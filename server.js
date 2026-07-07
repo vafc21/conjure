@@ -112,7 +112,9 @@ async function runUpdate(job) {
   const html = extractHtml(raw);
 
   if (!html) {
-    console.error('[update] no valid HTML produced; keeping previous version');
+    try { fs.writeFileSync(path.join(WS_DIR, 'last_error_raw.txt'), raw || '(empty)'); } catch (_) {}
+    console.error('[update] no valid HTML produced (raw ' + (raw ? raw.length : 0) +
+      ' bytes); keeping previous version. head: ' + JSON.stringify((raw || '').slice(0, 160)));
     setStatus('error', 'model did not return valid HTML; kept previous version');
     return;
   }
@@ -157,7 +159,16 @@ RULES:
 
 function callClaude(prompt) {
   return new Promise((resolve, reject) => {
-    const args = ['-p', '--model', MODEL, '--permission-mode', 'bypassPermissions'];
+    // Disallow every file-mutating / exec / network / agent tool so the model
+    // has no choice but to PRINT the finished file to stdout. (Left enabled:
+    // Read — needed so it can view the sketch image on disk.) Without this the
+    // agent tends to Write app.html itself and print only a prose summary,
+    // which both breaks stdout parsing and clobbers the live file.
+    const args = [
+      '-p', '--model', MODEL, '--permission-mode', 'bypassPermissions',
+      '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
+      'Bash', 'WebFetch', 'WebSearch', 'Task',
+    ];
     const child = spawn('claude', args, {
       cwd: WS_DIR,
       env: process.env,
