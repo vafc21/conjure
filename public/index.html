@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Conjure ✨</title>
+<style>
+  :root{
+    --bg:#0c0c14; --panel:#14141f; --panel2:#1b1b29; --line:#2a2a3d;
+    --ink:#ececf5; --muted:#9a9ab5; --accent:#7c5cff; --accent2:#00e0c6;
+    --ok:#37d67a; --warn:#ffb657; --danger:#ff5c7a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+  button{font:inherit;cursor:pointer}
+  .app{display:flex;height:100%;width:100%}
+  /* ---------- left / control panel ---------- */
+  .left{width:min(46%,560px);min-width:320px;display:flex;flex-direction:column;
+    background:var(--panel);border-right:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:.55rem;padding:.85rem 1rem;border-bottom:1px solid var(--line)}
+  .brand .logo{font-size:1.35rem}
+  .brand h1{font-size:1.05rem;margin:0;font-weight:700;letter-spacing:.3px}
+  .brand .sub{margin-left:auto;font-size:.72rem;color:var(--muted)}
+  .tabs{display:flex;gap:.4rem;padding:.6rem 1rem 0}
+  .tab{flex:1;padding:.55rem;border:1px solid var(--line);background:var(--panel2);
+    color:var(--muted);border-radius:10px 10px 0 0;border-bottom:none;font-weight:600;font-size:.9rem}
+  .tab.active{background:var(--panel);color:var(--ink);box-shadow:inset 0 2px 0 var(--accent)}
+  .pane{flex:1;overflow:auto;padding:1rem;display:none;flex-direction:column;gap:.85rem}
+  .pane.active{display:flex}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:.8rem}
+  label.fld{display:block;font-size:.78rem;color:var(--muted);margin:0 0 .35rem}
+  textarea,input[type=text]{width:100%;background:#0f0f18;border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:.6rem;font:inherit;resize:vertical}
+  textarea{min-height:64px}
+  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .btn{padding:.6rem .9rem;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:linear-gradient(135deg,var(--accent),#5b8cff);border:none;color:#fff;
+    box-shadow:0 6px 18px rgba(124,92,255,.35)}
+  .btn.primary:active{transform:translateY(1px)}
+  .btn.tool{padding:.5rem .7rem}
+  .btn.tool.on{border-color:var(--accent2);color:var(--accent2)}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .hint{font-size:.72rem;color:var(--muted);line-height:1.4}
+  .switch{display:inline-flex;align-items:center;gap:.4rem;font-size:.8rem;color:var(--muted)}
+  .switch input{accent-color:var(--accent)}
+  /* camera */
+  video{width:100%;border-radius:10px;background:#000;display:block}
+  .diffbar{height:7px;background:#0f0f18;border-radius:6px;overflow:hidden;margin-top:.5rem}
+  .diffbar>div{height:100%;width:0;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width .2s}
+  /* canvas */
+  .sketchwrap{position:relative;background:#fff;border-radius:10px;overflow:hidden;touch-action:none}
+  #sketch{display:block;width:100%;height:auto;cursor:crosshair;touch-action:none}
+  .notes-queue{display:flex;flex-direction:column;gap:.3rem}
+  .note-chip{background:#0f0f18;border:1px solid var(--line);border-radius:8px;padding:.35rem .5rem;
+    font-size:.78rem;display:flex;gap:.4rem;align-items:center}
+  .note-chip button{margin-left:auto;background:none;border:none;color:var(--muted)}
+  /* ---------- right / preview ---------- */
+  .right{flex:1;display:flex;flex-direction:column;background:var(--bg);min-width:0}
+  .statusbar{display:flex;align-items:center;gap:.6rem;padding:.7rem 1rem;border-bottom:1px solid var(--line)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+  .dot.watching{background:var(--accent2);box-shadow:0 0 10px var(--accent2)}
+  .dot.conjuring{background:var(--accent);animation:pulse 1s infinite}
+  .dot.updated{background:var(--ok)}
+  .dot.error{background:var(--danger)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .statustext{font-weight:600;font-size:.9rem}
+  .statusdetail{font-size:.76rem;color:var(--muted);margin-left:.2rem}
+  .statusbar .spacer{flex:1}
+  .frame{position:relative;flex:1;min-height:0}
+  iframe{width:100%;height:100%;border:0;background:#fff}
+  .shimmer{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .3s;
+    background:linear-gradient(115deg,transparent 30%,rgba(124,92,255,.18) 45%,rgba(0,224,198,.22) 50%,rgba(124,92,255,.18) 55%,transparent 70%);
+    background-size:250% 250%;display:flex;align-items:center;justify-content:center}
+  .shimmer.on{opacity:1;animation:sweep 1.4s linear infinite}
+  @keyframes sweep{0%{background-position:150% 0}100%{background-position:-50% 0}}
+  .shimmer .badge{background:rgba(12,12,20,.82);border:1px solid var(--accent);color:#fff;
+    padding:.5rem .9rem;border-radius:999px;font-weight:600;font-size:.85rem;backdrop-filter:blur(4px)}
+  /* mobile */
+  @media (max-width:820px){
+    .app{flex-direction:column;overflow:auto;height:auto;min-height:100%}
+    .left{width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--line)}
+    .right{min-height:60vh}
+    html,body{overflow:auto}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ LEFT: CONTROLS ============ -->
+  <section class="left">
+    <div class="brand">
+      <span class="logo">✨</span>
+      <h1>Conjure</h1>
+      <span class="sub">sketch → live app</span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-mode="canvas">✏️ Canvas</button>
+      <button class="tab" data-mode="camera">📷 Camera</button>
+    </div>
+
+    <!-- CANVAS MODE -->
+    <div class="pane active" data-pane="canvas">
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div class="row">
+            <button class="btn tool on" id="toolPen">🖊 Pen</button>
+            <button class="btn tool" id="toolErase">🩹 Eraser</button>
+            <button class="btn tool ghost" id="toolClear">🗑 Clear</button>
+          </div>
+          <label class="switch"><input type="checkbox" id="autoCanvas" checked> auto‑conjure</label>
+        </div>
+        <div class="sketchwrap" style="margin-top:.6rem">
+          <canvas id="sketch" width="720" height="520"></canvas>
+        </div>
+        <p class="hint" style="margin:.5rem 0 0">Draw your UI. Boxes = containers, words = labels, an ✗ through something = delete it. Auto‑conjures ~2.5s after you stop, or hit the button.</p>
+      </div>
+
+      <div class="card">
+        <label class="fld" for="canvasNote">Instructions (optional)</label>
+        <textarea id="canvasNote" placeholder="e.g. a todo app with a dark header and a progress bar"></textarea>
+        <div class="row" style="margin-top:.6rem">
+          <button class="btn primary" id="conjureCanvas">Conjure ✨</button>
+          <button class="btn" id="voiceCanvas">🎤 Voice</button>
+        </div>
+        <div class="notes-queue" id="voiceQueueCanvas" style="margin-top:.5rem"></div>
+      </div>
+    </div>
+
+    <!-- CAMERA MODE -->
+    <div class="pane" data-pane="camera">
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <button class="btn" id="camStart">▶ Start camera</button>
+          <label class="switch"><input type="checkbox" id="autoCam" checked> auto‑commit on change</label>
+        </div>
+        <video id="video" playsinline muted autoplay style="margin-top:.6rem"></video>
+        <div class="diffbar"><div id="diffFill"></div></div>
+        <p class="hint" style="margin:.5rem 0 0">Point at your paper sketch. When the drawing changes and then holds still, Conjure commits it automatically.</p>
+      </div>
+      <div class="card">
+        <label class="fld" for="camNote">Note to attach to next capture (optional)</label>
+        <input type="text" id="camNote" placeholder="e.g. make the header blue">
+        <div class="row" style="margin-top:.6rem">
+          <button class="btn primary" id="camShoot">📸 Capture now</button>
+          <button class="btn" id="voiceCam">🎤 Voice</button>
+        </div>
+        <div class="notes-queue" id="voiceQueueCam" style="margin-top:.5rem"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT: PREVIEW ============ -->
+  <section class="right">
+    <div class="statusbar">
+      <span class="dot watching" id="dot"></span>
+      <span class="statustext" id="statusText">Watching 👁</span>
+      <span class="statusdetail" id="statusDetail"></span>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="exportBtn">⬇ Export</button>
+      <button class="btn ghost" id="openBtn">↗ Open</button>
+    </div>
+    <div class="frame">
+      <iframe id="preview" title="Generated app"></iframe>
+      <div class="shimmer" id="shimmer"><span class="badge">Conjuring ✨</span></div>
+    </div>
+  </section>
+</div>
+
+<canvas id="scratch" width="64" height="64" style="display:none"></canvas>
+
+<script>
+(function(){
+  'use strict';
+  // Base-path agnostic: resolve everything relative to this page's directory,
+  // so it works at http://host:8091/ AND https://host/conjure/ .
+  var BASE = location.pathname.replace(/[^/]*$/, ''); // e.g. "/" or "/conjure/"
+  var api = function(p){ return BASE + p; };
+
+  var preview = document.getElementById('preview');
+  var shimmer = document.getElementById('shimmer');
+  var dot = document.getElementById('dot');
+  var statusText = document.getElementById('statusText');
+  var statusDetail = document.getElementById('statusDetail');
+
+  function bust(){ return api('app') + '?t=' + Date.now(); }
+  function reloadPreview(){ preview.src = bust(); }
+  reloadPreview();
+
+  // ---------------- status ----------------
+  function setState(state, textOverride, detail){
+    var map = { watching:['watching','Watching 👁'], conjuring:['conjuring','Conjuring ✨'],
+                updated:['updated','Updated ✓'], error:['error','Error'], idle:['watching','Watching 👁'] };
+    var m = map[state] || map.watching;
+    dot.className = 'dot ' + m[0];
+    statusText.textContent = textOverride || m[1];
+    statusDetail.textContent = detail || '';
+    if(state==='conjuring') shimmer.classList.add('on'); else shimmer.classList.remove('on');
+    if(state==='updated'){ setTimeout(function(){ if(dot.className.indexOf('updated')>=0) setState('watching'); }, 2500); }
+  }
+
+  // ---------------- websocket (reload + status) ----------------
+  function connectWS(){
+    var proto = location.protocol==='https:' ? 'wss:' : 'ws:';
+    var url = proto + '//' + location.host + BASE + 'ws';
+    var ws;
+    try { ws = new WebSocket(url); } catch(e){ setTimeout(connectWS, 2000); return; }
+    ws.onmessage = function(ev){
+      var msg; try{ msg = JSON.parse(ev.data); }catch(_){ return; }
+      if(msg.type==='reload'){ reloadPreview(); setState('updated'); }
+      else if(msg.type==='status'){
+        if(msg.state==='conjuring') setState('conjuring', null, msg.detail);
+        else if(msg.state==='error') setState('error', 'Error', msg.detail);
+        else if(msg.state==='updated') { /* reload event handles it */ }
+      }
+    };
+    ws.onclose = function(){ setTimeout(connectWS, 2000); };
+    ws.onerror = function(){ try{ ws.close(); }catch(_){} };
+  }
+  connectWS();
+
+  // ---------------- commit / update ----------------
+  var sending = false;
+  function commit(imageDataUrl, notes){
+    if(sending) return; // server also dedupes, but avoid piling client-side
+    sending = true;
+    setState('conjuring');
+    fetch(api('update'), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ image: imageDataUrl || null, notes: notes || [] })
+    }).then(function(r){ return r.json(); })
+      .then(function(){ sending=false; })
+      .catch(function(err){ sending=false; setState('error','Error', String(err)); });
+  }
+
+  // ---------------- voice (Web Speech API) ----------------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function makeVoice(btn, queueEl, store){
+    if(!SR){ btn.disabled = true; btn.textContent='🎤 n/a'; btn.title='Web Speech API not supported in this browser'; return; }
+    var rec = new SR(); rec.continuous=false; rec.interimResults=false; rec.lang='en-US';
+    var listening=false;
+    rec.onresult=function(e){
+      var t = e.results[0][0].transcript.trim();
+      if(t){ store.push(t); renderQueue(queueEl, store); }
+    };
+    rec.onend=function(){ listening=false; btn.classList.remove('on'); btn.textContent='🎤 Voice'; };
+    rec.onerror=function(){ listening=false; btn.classList.remove('on'); btn.textContent='🎤 Voice'; };
+    btn.addEventListener('click', function(){
+      if(listening){ try{rec.stop();}catch(_){}; return; }
+      try{ rec.start(); listening=true; btn.classList.add('on'); btn.textContent='🎤 …'; }catch(_){}
+    });
+  }
+  function renderQueue(el, store){
+    el.innerHTML='';
+    store.forEach(function(txt,i){
+      var chip=document.createElement('div'); chip.className='note-chip';
+      chip.innerHTML='<span>🎤 '+txt.replace(/</g,'&lt;')+'</span>';
+      var x=document.createElement('button'); x.textContent='✕';
+      x.onclick=function(){ store.splice(i,1); renderQueue(el,store); };
+      chip.appendChild(x); el.appendChild(chip);
+    });
+  }
+  var voiceCanvasStore=[], voiceCamStore=[];
+  makeVoice(document.getElementById('voiceCanvas'), document.getElementById('voiceQueueCanvas'), voiceCanvasStore);
+  makeVoice(document.getElementById('voiceCam'), document.getElementById('voiceQueueCam'), voiceCamStore);
+
+  // ---------------- tab switching ----------------
+  var tabs=document.querySelectorAll('.tab');
+  tabs.forEach(function(tab){
+    tab.addEventListener('click', function(){
+      tabs.forEach(function(t){t.classList.remove('active');});
+      tab.classList.add('active');
+      var mode=tab.getAttribute('data-mode');
+      document.querySelectorAll('.pane').forEach(function(p){
+        p.classList.toggle('active', p.getAttribute('data-pane')===mode);
+      });
+      if(mode!=='camera') stopCamera();
+    });
+  });
+
+  // ================= CANVAS MODE =================
+  var sketch=document.getElementById('sketch');
+  var sctx=sketch.getContext('2d');
+  function clearCanvas(){ sctx.fillStyle='#fff'; sctx.fillRect(0,0,sketch.width,sketch.height); }
+  clearCanvas();
+  var tool='pen', drawing=false, dirtyStrokes=false, lastX=0, lastY=0;
+  function setTool(t){
+    tool=t;
+    document.getElementById('toolPen').classList.toggle('on', t==='pen');
+    document.getElementById('toolErase').classList.toggle('on', t==='erase');
+  }
+  document.getElementById('toolPen').onclick=function(){ setTool('pen'); };
+  document.getElementById('toolErase').onclick=function(){ setTool('erase'); };
+  document.getElementById('toolClear').onclick=function(){ clearCanvas(); dirtyStrokes=false; };
+
+  function posFromEvent(e){
+    var r=sketch.getBoundingClientRect();
+    var cx = (e.touches? e.touches[0].clientX : e.clientX) - r.left;
+    var cy = (e.touches? e.touches[0].clientY : e.clientY) - r.top;
+    return { x: cx * (sketch.width/r.width), y: cy * (sketch.height/r.height) };
+  }
+  function startDraw(e){ e.preventDefault(); drawing=true; var p=posFromEvent(e); lastX=p.x; lastY=p.y; dot0(p); }
+  function dot0(p){ sctx.beginPath(); sctx.arc(p.x,p.y, tool==='erase'?14:3, 0, 7); sctx.fillStyle= tool==='erase'?'#fff':'#111'; sctx.fill(); dirtyStrokes=true; }
+  function moveDraw(e){
+    if(!drawing) return; e.preventDefault();
+    var p=posFromEvent(e);
+    sctx.strokeStyle = tool==='erase' ? '#fff' : '#111';
+    sctx.lineWidth = tool==='erase' ? 28 : 5;
+    sctx.lineCap='round'; sctx.lineJoin='round';
+    sctx.beginPath(); sctx.moveTo(lastX,lastY); sctx.lineTo(p.x,p.y); sctx.stroke();
+    lastX=p.x; lastY=p.y; dirtyStrokes=true;
+  }
+  function endDraw(){ if(!drawing) return; drawing=false; scheduleAuto(); }
+  sketch.addEventListener('mousedown',startDraw); sketch.addEventListener('mousemove',moveDraw);
+  window.addEventListener('mouseup',endDraw);
+  sketch.addEventListener('touchstart',startDraw,{passive:false});
+  sketch.addEventListener('touchmove',moveDraw,{passive:false});
+  sketch.addEventListener('touchend',endDraw);
+
+  var autoTimer=null;
+  function scheduleAuto(){
+    if(!document.getElementById('autoCanvas').checked) return;
+    if(autoTimer) clearTimeout(autoTimer);
+    autoTimer=setTimeout(function(){ if(dirtyStrokes) conjureCanvas(); }, 2500);
+  }
+  function collectCanvasNotes(){
+    var notes=[]; var t=document.getElementById('canvasNote').value.trim();
+    if(t) notes.push(t);
+    voiceCanvasStore.forEach(function(v){ notes.push(v); });
+    return notes;
+  }
+  function canvasHasInk(){
+    // sample the scratch downscale for any non-white pixel
+    var sc=document.getElementById('scratch'), g=sc.getContext('2d');
+    g.drawImage(sketch,0,0,64,64);
+    var d=g.getImageData(0,0,64,64).data;
+    for(var i=0;i<d.length;i+=4){ if(d[i]<230||d[i+1]<230||d[i+2]<230) return true; }
+    return false;
+  }
+  function conjureCanvas(){
+    var notes=collectCanvasNotes();
+    var hasInk=canvasHasInk();
+    if(!hasInk && notes.length===0){ setState('error','Nothing to conjure','draw something or add a note'); setTimeout(function(){setState('watching');},1500); return; }
+    var img = hasInk ? sketch.toDataURL('image/png') : null;
+    commit(img, notes);
+    dirtyStrokes=false;
+    // clear consumed voice notes
+    voiceCanvasStore.length=0; renderQueue(document.getElementById('voiceQueueCanvas'), voiceCanvasStore);
+    if(autoTimer){ clearTimeout(autoTimer); autoTimer=null; }
+  }
+  document.getElementById('conjureCanvas').onclick=conjureCanvas;
+  setTool('pen');
+
+  // ================= CAMERA MODE =================
+  var video=document.getElementById('video');
+  var diffFill=document.getElementById('diffFill');
+  var stream=null, camTimer=null, lastSmall=null, committedSmall=null, stableTicks=0;
+  var SMALL=64, CHANGE_THRESHOLD=14, STABLE_NEEDED=2;
+
+  function startCamera(){
+    if(stream) return;
+    navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1280}, height:{ideal:960} }, audio:false })
+      .then(function(s){ stream=s; video.srcObject=s; video.play();
+        document.getElementById('camStart').textContent='⏹ Stop camera';
+        camTimer=setInterval(tick, 2000);
+      })
+      .catch(function(err){ setState('error','Camera blocked', String(err.message||err)); });
+  }
+  function stopCamera(){
+    if(camTimer){ clearInterval(camTimer); camTimer=null; }
+    if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; }
+    document.getElementById('camStart').textContent='▶ Start camera';
+    lastSmall=null; committedSmall=null; stableTicks=0; diffFill.style.width='0%';
+  }
+  document.getElementById('camStart').onclick=function(){ stream?stopCamera():startCamera(); };
+
+  function grabSmall(){
+    if(!video.videoWidth) return null;
+    var sc=document.getElementById('scratch'), g=sc.getContext('2d');
+    g.drawImage(video,0,0,SMALL,SMALL);
+    var d=g.getImageData(0,0,SMALL,SMALL).data;
+    var gray=new Float32Array(SMALL*SMALL);
+    for(var i=0,j=0;i<d.length;i+=4,j++){ gray[j]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; }
+    return gray;
+  }
+  function meanDiff(a,b){ if(!a||!b) return 999; var s=0; for(var i=0;i<a.length;i++){ s+=Math.abs(a[i]-b[i]); } return s/a.length; }
+
+  function tick(){
+    if(sending) return;
+    var small=grabSmall(); if(!small) return;
+    var vsLast=meanDiff(small,lastSmall);
+    var vsCommitted=meanDiff(small,committedSmall);
+    lastSmall=small;
+    diffFill.style.width = Math.min(100, (vsCommitted/40)*100) + '%';
+
+    // changed vs committed, and now holding still vs previous tick
+    var changed = vsCommitted > CHANGE_THRESHOLD;
+    var still = vsLast < CHANGE_THRESHOLD/2;
+    if(changed && still){ stableTicks++; } else { stableTicks=0; }
+
+    if(changed && stableTicks>=STABLE_NEEDED && document.getElementById('autoCam').checked){
+      committedSmall=small; stableTicks=0;
+      captureFrame();
+    }
+  }
+  function collectCamNotes(){
+    var notes=[]; var t=document.getElementById('camNote').value.trim();
+    if(t) notes.push(t);
+    voiceCamStore.forEach(function(v){ notes.push(v); });
+    return notes;
+  }
+  function captureFrame(){
+    var c=document.createElement('canvas'); c.width=video.videoWidth||1280; c.height=video.videoHeight||960;
+    c.getContext('2d').drawImage(video,0,0,c.width,c.height);
+    var notes=collectCamNotes();
+    commit(c.toDataURL('image/png'), notes);
+    document.getElementById('camNote').value='';
+    voiceCamStore.length=0; renderQueue(document.getElementById('voiceQueueCam'), voiceCamStore);
+  }
+  document.getElementById('camShoot').onclick=function(){
+    if(!stream){ startCamera(); setTimeout(captureFrame, 1200); return; }
+    committedSmall=grabSmall(); captureFrame();
+  };
+
+  // ---------------- export / open ----------------
+  document.getElementById('exportBtn').onclick=function(){
+    var a=document.createElement('a'); a.href=api('app.html'); a.download='app.html'; a.click();
+  };
+  document.getElementById('openBtn').onclick=function(){ window.open(bust(), '_blank'); };
+
+  setState('watching');
+})();
+</script>
+</body>
+</html>

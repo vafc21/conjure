@@ -1,0 +1,7 @@
+node_modules/
+workspace/frames/*
+workspace/history/*
+workspace/app.html
+!workspace/frames/.gitkeep
+!workspace/history/.gitkeep
+*.log
