@@ -59,12 +59,6 @@ const IDLE_MS = parseInt(process.env.CONJURE_IDLE_MS || process.env.CONJURE_TIME
 const HARD_MAX_MS = parseInt(process.env.CONJURE_MAX_BUILD_MS || '1800000', 10); // 30 min
 const WATCH_TICK_MS = parseInt(process.env.CONJURE_WATCH_TICK_MS || '15000', 10);
 const PROBE_MODEL = process.env.CONJURE_PROBE_MODEL || 'haiku';
-// Art director: a fast Fable pass writes a concrete design brief that the Sonnet
-// builder must follow, so generated sites look intentionally designed. Runs on
-// new-site builds by default ('new'); 'all' = every build, 'off' = disabled.
-const ART_MODEL = process.env.CONJURE_ART_MODEL || 'fable';
-const ART_DIRECTOR = (process.env.CONJURE_ART_DIRECTOR || 'new').toLowerCase();
-const ART_TIMEOUT_MS = parseInt(process.env.CONJURE_ART_TIMEOUT_MS || '75000', 10);
 const MAX_CONCURRENT = parseInt(process.env.CONJURE_MAX_CONCURRENT || '2', 10);
 
 const PASSPHRASE = process.env.CONJURE_PASSPHRASE || '';
@@ -332,22 +326,7 @@ async function runUpdate(slug, job) {
   }
 
   const current = fs.existsSync(appFile(slug)) ? fs.readFileSync(appFile(slug), 'utf8') : '';
-
-  // Art-director pass (Fable) — establish a strong, app-specific look. Runs on
-  // new sites by default; never blocks the build if it fails.
-  let built = false;
-  try { built = !!JSON.parse(fs.readFileSync(metaFile(slug), 'utf8')).built; } catch (_) {}
-  let brief = null;
-  if (ART_DIRECTOR === 'all' || (ART_DIRECTOR === 'new' && !built)) {
-    setStatus(slug, 'conjuring', 'art director shaping the look…');
-    broadcastProject(slug, { type: 'term', kind: 'note', label: 'design', snippet: `art director (${ART_MODEL}) setting the visual direction…` });
-    const term0 = Date.now();
-    brief = await designBrief(slug, job.notes || [], frameName);
-    if (brief) broadcastProject(slug, { type: 'term', kind: 'note', label: 'design', snippet: `design brief ready (${((Date.now() - term0) / 1000).toFixed(0)}s) — handing to the builder` });
-    else broadcastProject(slug, { type: 'term', kind: 'note', label: 'design', snippet: 'art director skipped — building on standing style rules' });
-  }
-
-  const prompt = buildPrompt(current, job.notes || [], frameName, job.kind, job.view, brief);
+  const prompt = buildPrompt(current, job.notes || [], frameName, job.kind, job.view);
 
   setStatus(slug, 'conjuring', framePath ? (job.kind === 'markup' ? 'reading your markup…' : 'interpreting sketch…') : 'applying notes…');
   console.log(`[update ${slug}] ${ts} image=${!!framePath} notes=${(job.notes || []).length}`);
@@ -403,7 +382,7 @@ async function runUpdate(slug, job) {
 // ---------------------------------------------------------------------------
 // Prompt
 // ---------------------------------------------------------------------------
-function buildPrompt(current, notes, frameName, kind, view, brief) {
+function buildPrompt(current, notes, frameName, kind, view) {
   const noteBlock = notes && notes.length
     ? notes.map((n, i) => `  ${i + 1}. ${n}`).join('\n')
     : '  (none)';
@@ -426,12 +405,7 @@ function buildPrompt(current, notes, frameName, kind, view, brief) {
   return `You maintain a single-file web app (app.html) whose specification is a sketch (a photo of paper OR a digital drawing) plus optional typed/spoken notes.
 
 ${imgLine}
-${viewLine}${brief ? `
-DESIGN DIRECTION — a design director prepared this brief specifically for this app. Treat it as AUTHORITATIVE for the visual system (palette, typography, layout, spacing, signature touches). Follow it precisely. The user's own drawn/written intent still wins wherever they conflict.
-<<<DESIGN_BRIEF
-${brief}
-DESIGN_BRIEF
-` : ''}
+${viewLine}
 Notes from the user (typed and/or voice-transcribed):
 ${noteBlock}
 
@@ -453,21 +427,17 @@ CLARIFYING QUESTION — only when you GENUINELY cannot proceed:
 - bbox is the percent region (0-100) of the sketch you are asking about; include it only if a specific region is unclear, otherwise use {"x":0,"y":0,"w":100,"h":100}.
 - Use this sparingly — prefer the most reasonable interpretation whenever one plausibly exists.
 
-VISUAL STYLE — the user's drawn/written intent ALWAYS wins; when they specify colors, mood, or a style, follow it. Otherwise, when style is unspecified, design like a thoughtful human and DO NOT produce the generic "AI-generated" look. Concretely:
-- DO NOT default to purple/violet/indigo accents (no #7c5cff / indigo-500 family) and DO NOT use purple→blue or purple→teal gradients anywhere (backgrounds, buttons, or text fills).
-- No glassmorphism (blurred translucent frosted cards), no big colored glow/neon box-shadows, no gradient-filled headline text, no floating gradient "orbs".
-- No emoji used as headings, buttons, bullets, or decoration. No "magic/sparkle/conjure" filler copy. No pill "badge" floating above a centered hero, no row of three identical icon-topped cards unless the sketch actually shows that.
-- Choose a restrained palette that fits what was sketched: mostly honest neutrals (white / off-white / paper / greys, or a clean true dark with AA-contrast text) plus AT MOST ONE confident accent color that is NOT purple. Use color to signal function, not to decorate.
-- Typography: a plain system font stack (system-ui, -apple-system, "Segoe UI", Roboto, sans-serif) or ONE deliberate common family; build hierarchy with size/weight/spacing. Modest border-radius (4-8px). Prefer hairline borders over heavy shadows.
-
-WEB QUALITY — build it like a competent front-end engineer would:
-- Visual hierarchy: one clear primary action per view; group related things; align everything to a shared grid — no ragged edges or ad-hoc padding.
-- Spacing on a consistent scale (4/8px steps). Whitespace is structural, not wasted.
-- Contrast: body text ≥ 4.5:1 on its background; interactive controls and focus rings ≥ 3:1. Never signal state by color alone. Give inputs real <label>s and a visible :focus-visible outline.
-- Responsive & mobile: never require horizontal scroll; single-column reflow on small screens; touch targets ≥ 44px; inputs ≥ 16px font (avoids iOS zoom) with correct type/inputmode.
-- Typography scale: base 16px+, line-height ~1.5 for body; hierarchy via size/weight, not many families; body line length 45–75 characters.
-- Perceived performance & states: instant feedback on interactions; handle empty, loading, and error states; avoid layout shift. Use real, plausible content, not lorem ipsum.
-- Forms: label above field, inline validation on blur with a specific fix, preserve entered data on error, obvious primary submit.
+DESIGN
+The user's drawn/written style ALWAYS wins — follow their colors, mood, and layout exactly. When style is unspecified, design like a skilled human with restrained, deliberate taste — never the generic "AI look":
+- BANNED: purple/violet/indigo accents (no #7c5cff / indigo-500 family); purple→blue/teal gradients; glassmorphism; neon/colored glow shadows; gradient-filled text; floating gradient orbs; emoji as headings, buttons, bullets, or decoration; "magic/sparkle" filler copy; centered-hero pill badges and three-identical-icon-card rows unless explicitly requested.
+- Palette: honest neutrals (or clean true-dark) plus AT MOST ONE confident non-purple accent. Color signals function, never mere decoration; never state by color alone.
+- Type: system font stack or ONE common family. Hierarchy via size/weight/spacing only. Base ≥16px, line-height ~1.5, body lines 45–75ch.
+- Surfaces: modest 4–8px radius; hairline borders over heavy shadows.
+- Layout: one clear primary action per view; group related items on a shared grid; 4/8px spacing scale — whitespace is structural.
+- Accessibility: body text contrast ≥4.5:1; controls and focus indicators ≥3:1; visible :focus-visible outline; real <label>s.
+- Responsive: no horizontal scroll ever; single-column reflow on mobile; touch targets ≥44px; inputs ≥16px font.
+- States & content: handle empty, loading, and error states; instant feedback; no layout shift; real plausible content, never lorem ipsum.
+- Forms: label above field; inline validation on blur; preserve entered data on error; one obvious primary submit.
 
 HOW TO APPLY CHANGES (this matters for speed — do it exactly):
 - Make your changes by EDITING app.html IN PLACE with your Edit / MultiEdit tool. Change only the specific lines that must change and leave the rest of the file byte-for-byte identical. Do NOT rewrite the whole file, and do NOT print the HTML to stdout.
@@ -536,44 +506,6 @@ function claudeHealthy(timeoutMs = 30000) {
     child.on('error', () => { if (done) return; done = true; clearTimeout(to); resolve(false); });
     child.on('close', (code) => { if (done) return; done = true; clearTimeout(to); resolve(code === 0 && out.trim().length > 0); });
     try { child.stdin.write('Reply with the single word OK.'); child.stdin.end(); } catch (_) {}
-  });
-}
-
-// Art-director pass: ask Fable (fast) to write a concrete, app-specific design
-// brief that the Sonnet builder must follow. Returns the brief text, or null on
-// any failure/timeout (the build then proceeds on the standing style rules).
-function designBrief(slug, notes, frameName) {
-  return new Promise((resolve) => {
-    const noteText = (notes && notes.length) ? notes.join('; ') : '(no written notes — infer intent from the sketch image if present)';
-    const frameLine = frameName
-      ? `A sketch/screenshot image is on disk at frames/${frameName} in your working directory. Use your Read tool to view it and understand the intended layout and content.`
-      : `There is no image this time — design from the description alone.`;
-    const prompt = `You are a senior product & brand designer with sharp front-end taste. A builder AI is about to generate a single-file web app. Write a SHORT, concrete DESIGN BRIEF it must follow so the result looks intentionally designed by a skilled human — not generic "AI slop".
-
-What the user is making: ${noteText}
-${frameLine}
-
-Write the brief as tight bullet points, max ~160 words, covering:
-- Direction: one line naming the mood/style that fits THIS app.
-- Palette: 3-5 hex colors with roles (background, surface, text, ONE accent, muted). The accent must NOT be purple/violet/indigo.
-- Type: a concrete font stack (a system stack or one common family) and how to build hierarchy with size/weight.
-- Layout & rhythm: overall structure, spacing scale (e.g. 4/8px steps), border-radius, hairline borders vs shadows.
-- 2-3 signature touches that make it feel crafted and specific to THIS app.
-
-Hard rules: no purple/indigo, no gradients, no glassmorphism, no neon glows, no emoji as chrome, no gradient-filled text. If the user's sketch or notes specify colors or a style, HONOR them — refine, don't override.
-
-Output ONLY the brief. No preamble, no sign-off, no code, no markdown headings.`;
-    let out = '', done = false, child;
-    try {
-      child = spawn('claude', ['-p', '--model', ART_MODEL, '--permission-mode', 'bypassPermissions',
-        '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch', 'Task'],
-        { cwd: projectDir(slug), env: process.env, stdio: ['pipe', 'pipe', 'ignore'] });
-    } catch (_) { resolve(null); return; }
-    const to = setTimeout(() => { if (done) return; done = true; try { child.kill('SIGKILL'); } catch (_) {} resolve(out.trim() || null); }, ART_TIMEOUT_MS);
-    child.stdout.on('data', (d) => { out += d.toString(); });
-    child.on('error', () => { if (done) return; done = true; clearTimeout(to); resolve(null); });
-    child.on('close', () => { if (done) return; done = true; clearTimeout(to); resolve(out.trim() || null); });
-    try { child.stdin.write(prompt); child.stdin.end(); } catch (_) {}
   });
 }
 
