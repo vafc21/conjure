@@ -318,7 +318,7 @@ async function runUpdate(slug, job) {
   }
 
   const current = fs.existsSync(appFile(slug)) ? fs.readFileSync(appFile(slug), 'utf8') : '';
-  const prompt = buildPrompt(current, job.notes || [], frameName, job.kind);
+  const prompt = buildPrompt(current, job.notes || [], frameName, job.kind, job.view);
 
   setStatus(slug, 'conjuring', framePath ? (job.kind === 'markup' ? 'reading your markup…' : 'interpreting sketch…') : 'applying notes…');
   console.log(`[update ${slug}] ${ts} image=${!!framePath} notes=${(job.notes || []).length}`);
@@ -365,10 +365,19 @@ async function runUpdate(slug, job) {
 // ---------------------------------------------------------------------------
 // Prompt
 // ---------------------------------------------------------------------------
-function buildPrompt(current, notes, frameName, kind) {
+function buildPrompt(current, notes, frameName, kind, view) {
   const noteBlock = notes && notes.length
     ? notes.map((n, i) => `  ${i + 1}. ${n}`).join('\n')
     : '  (none)';
+
+  const viewBits = view ? [
+    view.route ? `route "${String(view.route).slice(0, 80)}"` : null,
+    view.title ? `title "${String(view.title).slice(0, 80)}"` : null,
+    view.heading ? `heading "${String(view.heading).slice(0, 80)}"` : null,
+  ].filter(Boolean) : [];
+  const viewLine = viewBits.length
+    ? `\nCURRENT PAGE THE USER IS VIEWING: ${viewBits.join(', ')}. The screenshot/markup and the requested changes apply to THIS page/view. Edit THIS page; leave the other pages' content intact, except shared navigation/header/footer which must stay consistent across every page.\n`
+    : '';
 
   const imgLine = frameName
     ? (kind === 'markup'
@@ -379,7 +388,7 @@ function buildPrompt(current, notes, frameName, kind) {
   return `You maintain a single-file web app (app.html) whose specification is a sketch (a photo of paper OR a digital drawing) plus optional typed/spoken notes.
 
 ${imgLine}
-
+${viewLine}
 Notes from the user (typed and/or voice-transcribed):
 ${noteBlock}
 
@@ -393,6 +402,8 @@ RULES:
 - COLOR IN THE SKETCH CARRIES MEANING: the drawing may use several marker colors. Ink in a DIFFERENT color from the main drawing is usually an annotation/instruction (e.g. a red arrow + "make this bigger"), and colored elements often indicate the desired color of that element. Read color intent, don't ignore it.
 - Change ONLY what changed in the sketch or was requested in the notes. Preserve all other existing features, structure, and styling.
 - Everything must actually work: buttons click and do something, charts render with plausible fake data, inputs validate, nav switches views.
+- MULTI-PAGE: this one file may hold several pages/views. Implement page switching with hash routes (#home, #about, …) so each page is directly linkable and the browser URL reflects the current page, and show/hide the matching view. Include ONE persistent, consistent site navigation on EVERY page that links all pages together, with a clear Home link. Preserve ALL existing pages and their content on every build — never drop a page.
+- When the notes ask to ADD a page, create it as a new hash-routed view, add its link to the navigation on every page, keep the shared header/nav/footer consistent, and make it the shown page. When editing an existing page, change only the CURRENT page (named above) plus shared chrome.
 - Single self-contained file. Inline CSS and JS only. No external network calls, no CDN links, no external fonts.
 - Persist meaningful app state in localStorage so a reload does not lose user data.
 
@@ -852,7 +863,16 @@ app.post('/update', (req, res) => {
     return res.status(400).json({ ok: false, error: 'need an image or at least one note' });
   }
   const kind = body.kind === 'markup' ? 'markup' : 'sketch';
-  enqueue(slug, { image: imageBuf, notes, kind });
+  let view = null;
+  if (body.view && typeof body.view === 'object') {
+    const v = body.view;
+    view = {
+      route: typeof v.route === 'string' ? v.route.slice(0, 120) : '',
+      title: typeof v.title === 'string' ? v.title.slice(0, 120) : '',
+      heading: typeof v.heading === 'string' ? v.heading.slice(0, 120) : '',
+    };
+  }
+  enqueue(slug, { image: imageBuf, notes, kind, view });
   res.json({ ok: true, queued: true, project: slug });
 });
 

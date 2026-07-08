@@ -106,6 +106,10 @@
   .marktools input.note{width:150px;max-width:38vw;background:var(--sheet);border:1px solid var(--line2);
     border-radius:5px;padding:.4rem .5rem;font:inherit;font-size:16px;color:var(--ink)}
   .marktools input.note:focus{outline:none;border-color:var(--accent)}
+  .pagelabel{font-family:var(--mono);font-size:.7rem;color:var(--muted);padding:.2rem .45rem;
+    border:1px solid var(--line2);border-radius:5px;background:var(--sheet);
+    max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pagelabel:empty{display:none}
   .mob-only{display:none}
   /* camera */
   video{width:100%;border-radius:5px;background:#111;display:block}
@@ -237,6 +241,7 @@
           <div class="row"><strong style="font-size:.98rem">Draw right on your app</strong></div>
           <p class="hint" style="margin:.55rem 0 0">Your app is live in the preview. Hit <b>✎ Markup</b> on it, then draw your edits straight onto it — circle what to change, cross out (<b>✗</b>) what to delete, add an arrow, write a label. Colors carry meaning. Press <b>Build</b> and it rebuilds from your markup.</p>
           <p class="hint" style="margin:.45rem 0 0">Brand-new project with nothing built yet? Just draw the UI you want — your first Build turns the drawing into the app.</p>
+          <p class="hint" style="margin:.45rem 0 0"><b>Pages:</b> hit <b>+ Page</b> above the preview to add pages to this site. They get linked in the nav, and every edit applies to the page you're currently viewing (shown as “on: …”).</p>
           <div class="row" style="margin-top:.75rem">
             <button class="btn primary mob-only" id="openApp">Open the app to draw</button>
             <button class="btn primary" id="buildMarkup">Build from markup</button>
@@ -293,6 +298,8 @@
       <!-- markup toolbar: docked strip above the preview, not over the app -->
       <div class="marktools" id="markTools">
         <button class="btn tool" id="penToggle" title="Toggle drawing on the app">✎ Markup</button>
+        <span class="pagelabel" id="pageLabel" title="The page you are viewing — edits apply here"></span>
+        <button class="btn tool" id="addPage" title="Add a new page, linked in the nav">+ Page</button>
         <span class="grp">
           <span class="sep"></span>
           <span class="markers" role="group" aria-label="Marker color">
@@ -558,13 +565,27 @@
   // ---------------- commit ----------------
   var sending=false;
   var lastImage={}; // per-project last submitted data URL (for question re-submit)
+  // Which page/view is showing in the preview right now — so the build edits the
+  // page you're actually looking at, not a guess. Read from the live iframe.
+  function currentView(){
+    try{
+      var w=preview.contentWindow, d=preview.contentDocument; if(!d) return null;
+      var route=(w.location.hash||'')||''; if(!route && w.location.pathname && w.location.pathname!=='/') route=w.location.pathname;
+      var title=(d.title||'').trim();
+      var heading='';
+      var hs=d.querySelectorAll('h1,h2,[role=heading]');
+      for(var i=0;i<hs.length;i++){ var el=hs[i]; if(el.offsetParent!==null && (el.textContent||'').trim()){ heading=el.textContent.trim().slice(0,80); break; } }
+      if(!route && !title && !heading) return null;
+      return { route:route, title:title, heading:heading };
+    }catch(_){ return null; }
+  }
   function commit(imageDataUrl, notes, kind){
     if(sending) return;
     sending=true; setState('conjuring');
     if(imageDataUrl) lastImage[currentProject]=imageDataUrl;
     clearTerminal();
     apiFetch('update',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ project:currentProject, image:imageDataUrl||null, notes:notes||[], kind:kind||'sketch' })})
+      body:JSON.stringify({ project:currentProject, image:imageDataUrl||null, notes:notes||[], kind:kind||'sketch', view:currentView() })})
       .then(function(r){return r.json();})
       .then(function(){ sending=false; })
       .catch(function(err){ sending=false; setState('error','Error',String(err)); });
@@ -677,7 +698,23 @@
       octx.drawImage(im,0,0,overlay.width,overlay.height); octx.restore(); }; im.src=prevURL; }
   }
   window.addEventListener('resize', sizeOverlay);
-  preview.addEventListener('load', function(){ setMarkup(false); sizeOverlay(); });
+  preview.addEventListener('load', function(){ setMarkup(false); sizeOverlay(); updatePageLabel(); hookRoute(); });
+
+  // Show which page is on screen; follow in-app navigation (hash routes) live so
+  // the label — and the build's page context — always match what you're viewing.
+  function updatePageLabel(){
+    var v=currentView();
+    var name = v ? (v.heading || v.title || (v.route||'').replace(/^#\/?/,'') || '') : '';
+    var el=$('pageLabel'); if(!el) return;
+    el.textContent = name ? ('on: '+name) : '';
+  }
+  var routeHooked=false;
+  function hookRoute(){
+    try{ var w=preview.contentWindow; if(!w) return;
+      w.removeEventListener('hashchange', updatePageLabel);
+      w.addEventListener('hashchange', updatePageLabel);
+    }catch(_){}
+  }
 
   function inkPresent(){
     try{ var d=octx.getImageData(0,0,overlay.width,overlay.height).data;
@@ -797,6 +834,16 @@
   }
   $('buildMarkup').onclick=buildFromMarkup;
   $('buildMarkupFloat').onclick=buildFromMarkup;
+
+  // Add a new page to the current project's site (Claude wires it into the nav).
+  function addPage(){
+    if(sending){ setState('error','Busy','wait for the current build to finish'); setTimeout(function(){setState('watching');},1400); return; }
+    var name=prompt('New page name (e.g. About, Pricing, Contact):'); if(!name||!name.trim()) return;
+    name=name.trim().slice(0,60);
+    var slug=name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'page';
+    commit(null, ['Add a new page called "'+name+'" to this site. Give it its own hash route (#'+slug+'), add a link to it in the shared site navigation on EVERY page (keep the Home link), keep the header/nav/footer consistent across all pages, and preserve every existing page. Make this new page the one shown.'], 'sketch');
+  }
+  $('addPage').onclick=addPage;
 
   // ================= CAMERA MODE =================
   var video=$('video'), diffFill=$('diffFill');
