@@ -352,19 +352,28 @@ async function runUpdate(slug, job) {
     return;
   }
 
-  const html = extractHtml(raw);
+  // The model edits app.html in place — read the result from disk. Fall back to
+  // stdout-printed HTML if the file didn't change (e.g. it printed instead).
+  const validHtml = (s) => s && s.length > 60 && /<(?:!doctype html|html[\s>])/i.test(s);
+  let after = '';
+  try { after = fs.existsSync(appFile(slug)) ? fs.readFileSync(appFile(slug), 'utf8') : ''; } catch (_) {}
+  let html = null;
+  if (after && after !== current && validHtml(after)) {
+    html = after; // edited or created in place — app.html already holds it
+  } else {
+    const printed = extractHtml(raw);
+    if (printed) { html = printed; fs.writeFileSync(appFile(slug), html); }
+  }
   if (!html) {
     try { fs.writeFileSync(path.join(projectDir(slug), 'last_error_raw.txt'), raw || '(empty)'); } catch (_) {}
-    console.error(`[update ${slug}] no valid HTML (raw ${raw ? raw.length : 0}b); keeping previous. head: ` +
-      JSON.stringify((raw || '').slice(0, 160)));
-    setStatus(slug, 'error', 'model did not return valid HTML; kept previous version');
+    console.error(`[update ${slug}] no change produced (raw ${raw ? raw.length : 0}b, disk ${after.length}b); keeping previous.`);
+    setStatus(slug, 'error', (after && after === current) ? 'no changes were made' : 'model did not produce valid HTML; kept previous version');
     return;
   }
 
-  fs.writeFileSync(appFile(slug), html);
   fs.writeFileSync(path.join(historyDir(slug), `${ts}.html`), html);
   markBuilt(slug);
-  console.log(`[update ${slug}] ${ts} wrote app.html (${html.length} bytes)`);
+  console.log(`[update ${slug}] ${ts} wrote app.html (${html.length} bytes, in-place=${html === after})`);
   broadcastProject(slug, { type: 'term', kind: 'done', label: 'done', snippet: `wrote ${html.length} bytes` });
   setStatus(slug, 'updated', 'app updated');
   broadcastProject(slug, { type: 'reload' });
@@ -400,10 +409,7 @@ ${viewLine}
 Notes from the user (typed and/or voice-transcribed):
 ${noteBlock}
 
-Here is the CURRENT app.html (may be a placeholder). Modify it in place — do not start from scratch unless it is the placeholder:
-<<<CURRENT_APP_HTML
-${current}
-CURRENT_APP_HTML
+The current app is the file app.html in your working directory (it may be a placeholder). FIRST use your Read tool to read app.html so you can see exactly what is there, THEN edit it.
 
 RULES:
 - Interpret sketches generously: boxes are containers, scribbled words are text/labels, arrows imply flow/order, and an X or scribble struck THROUGH an element means DELETE that element.
@@ -437,7 +443,12 @@ WEB QUALITY — build it like a competent front-end engineer would:
 - Perceived performance & states: instant feedback on interactions; handle empty, loading, and error states; avoid layout shift. Use real, plausible content, not lorem ipsum.
 - Forms: label above field, inline validation on blur with a specific fix, preserve entered data on error, obvious primary submit.
 
-- Output ONLY the complete updated HTML file, starting with <!doctype html>. No explanations, no markdown fences. (Unless you are asking a QUESTION as described above.)`;
+HOW TO APPLY CHANGES (this matters for speed — do it exactly):
+- Make your changes by EDITING app.html IN PLACE with your Edit / MultiEdit tool. Change only the specific lines that must change and leave the rest of the file byte-for-byte identical. Do NOT rewrite the whole file, and do NOT print the HTML to stdout.
+- Prefer several small, targeted edits over one big replacement. On a large file this is dramatically faster than re-emitting everything.
+- ONLY if app.html is the empty "Nothing built yet" placeholder (or is missing) may you create the whole file fresh with your Write tool.
+- When you finish, app.html on disk MUST be a complete, valid, self-contained HTML document starting with <!doctype html>. Never leave it half-edited or broken.
+- Print NOTHING to stdout — no prose, no HTML, no summary. The ONLY thing you may ever print is a single QUESTION:{...} line, and only in the genuine can't-proceed case described above (when asking, do not edit the file).`;
 }
 
 // ---------------------------------------------------------------------------
@@ -504,15 +515,15 @@ function claudeHealthy(timeoutMs = 30000) {
 
 function runClaudeStream(slug, prompt, term) {
   return new Promise((resolve, reject) => {
-    // Disallow every file-mutating / exec / network / agent tool so the model
-    // has no choice but to PRINT the finished file to stdout. (Read stays
-    // enabled so it can view the sketch image on disk.)
+    // Read/Write/Edit/MultiEdit are ENABLED so the model edits app.html in place
+    // (emitting only the changed lines) instead of re-printing the whole file —
+    // small edits on a large app go from minutes to seconds. Exec / network /
+    // agent tools stay disabled so it can't run commands or reach the internet.
     const args = [
       '-p', '--model', MODEL,
       '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
       '--permission-mode', 'bypassPermissions',
-      '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
-      'Bash', 'WebFetch', 'WebSearch', 'Task',
+      '--disallowedTools', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch', 'Task',
     ];
     const child = spawn('claude', args, {
       cwd: projectDir(slug), env: process.env, stdio: ['pipe', 'pipe', 'pipe'],
