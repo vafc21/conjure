@@ -43,20 +43,24 @@ function seedApp() {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your app</title>
 <style>
-  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(circle at 30% 20%,#1b1b2f,#0d0d16);color:#e8e8f0;text-align:center}
-  .wrap{max-width:520px;padding:2rem}
-  h1{font-weight:700;letter-spacing:.5px;margin:0 0 .5rem}
-  p{opacity:.7;line-height:1.5}
-  .spark{font-size:3rem;animation:f 3s ease-in-out infinite}
-  @keyframes f{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-8px) rotate(4deg)}}
+    background:#e7e0d2;color:#26231d;text-align:center}
+  .wrap{max-width:480px;padding:2rem}
+  .mark{width:34px;height:34px;margin:0 auto 1rem;color:#b2482b}
+  h1{font-weight:700;font-size:1.35rem;margin:0 0 .5rem}
+  p{color:#7c7566;line-height:1.55;font-size:.95rem}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f8f4ec;
+    border:1px solid #d3c8b4;border-radius:4px;padding:.05rem .35rem;color:#26231d}
 </style></head>
 <body><div class="wrap">
-  <div class="spark">✨</div>
-  <h1>Start conjuring</h1>
-  <p>Sketch a UI on paper (point the camera at it) or draw on the canvas, add a note,
-     and this panel will become your working app.</p>
+  <svg class="mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12.5 2.5l3 3-8.5 8.5-3.7 .7 .7-3.7 8.5-8.5z"/><path d="M10.7 4.3l3 3"/>
+  </svg>
+  <h1>Nothing built yet</h1>
+  <p>Point the camera at a paper sketch or draw on the canvas, add a note if you like,
+     and press <code>Build it</code>. This panel becomes your working app.</p>
 </div></body></html>`;
 }
 
@@ -153,7 +157,16 @@ RULES:
 - Everything must actually work: buttons click and do something, charts render with plausible fake data, inputs validate, nav switches views.
 - Single self-contained file. Inline CSS and JS only. No external network calls, no CDN links, no external fonts.
 - Persist meaningful app state in localStorage so a reload does not lose user data.
-- If the sketch is ambiguous, choose the most impressive reasonable interpretation.
+- If the sketch is ambiguous, choose the most reasonable interpretation.
+
+VISUAL STYLE — the user's drawn/written intent ALWAYS wins; when they specify colors, mood, or a style, follow it. Otherwise, when style is unspecified, design like a thoughtful human and DO NOT produce the generic "AI-generated" look. Concretely:
+- DO NOT default to purple/violet/indigo accents (no #7c5cff / indigo-500 family) and DO NOT use purple→blue or purple→teal gradients anywhere (backgrounds, buttons, or text fills).
+- No glassmorphism (blurred translucent frosted cards), no big colored glow/neon box-shadows, no gradient-filled headline text, no floating gradient "orbs".
+- No emoji used as headings, buttons, bullets, or decoration. No "magic/sparkle/conjure" filler copy. No pill "badge" floating above a centered hero, no row of three identical icon-topped cards unless the sketch actually shows that.
+- Choose a restrained palette that fits what was sketched: mostly honest neutrals (white / off-white / paper / greys, or a clean true dark with AA-contrast text) plus AT MOST ONE confident accent color that is NOT purple. Use color to signal function, not to decorate.
+- Typography: a plain system font stack (system-ui, -apple-system, "Segoe UI", Roboto, sans-serif) or ONE deliberate common family; build hierarchy with size/weight/spacing. Modest border-radius (4-8px). Prefer hairline borders over heavy shadows.
+- Aim for a clean, purposeful, slightly utilitarian feel appropriate to the app's function — not a marketing landing page.
+
 - Output ONLY the complete updated HTML file, starting with <!doctype html>. No explanations, no markdown fences.`;
 }
 
