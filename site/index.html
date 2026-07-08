@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conjure — draw your app into being</title>
+<meta name="description" content="Sketch a UI on paper, on a canvas, or right on your live app — and watch Conjure build it into a real, working web app. No code, no prompt-wrangling.">
+<style>
+  :root{
+    --paper:#e7e0d2; --panel:#efe9dd; --panel2:#f8f4ec; --sheet:#fdfbf6;
+    --line:#d3c8b4; --line2:#c3b79e;
+    --ink:#26231d; --muted:#7c7566; --faint:#a49b88;
+    --accent:#b2482b; --accent-ink:#8f3820;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;line-height:1.55}
+  a{color:inherit}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 1.25rem}
+  .mono{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+
+  /* nav */
+  header{position:sticky;top:0;z-index:10;background:rgba(231,224,210,.9);
+    backdrop-filter:saturate(1.1);border-bottom:1px solid var(--line2)}
+  .nav{display:flex;align-items:center;gap:.6rem;height:60px}
+  .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;letter-spacing:.2px}
+  .brand .sub{font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .nav .spacer{flex:1}
+  .nav a.link{text-decoration:none;color:var(--muted);font-size:.9rem;margin:0 .7rem;display:none}
+  .nav a.link:hover{color:var(--ink)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;
+    font-weight:600;font-size:.92rem;padding:.62rem 1.1rem;border-radius:7px;border:1px solid var(--line2);
+    background:var(--sheet);color:var(--ink);cursor:pointer}
+  .btn:hover{border-color:var(--ink)}
+  .btn.primary{background:var(--accent);border-color:var(--accent-ink);color:#fdfbf6}
+  .btn.primary:hover{background:var(--accent-ink)}
+  @media(min-width:760px){ .nav a.link{display:inline} }
+
+  /* hero */
+  .hero{padding:5.5rem 0 3.5rem;display:grid;grid-template-columns:1fr;gap:2.5rem;align-items:center}
+  .kicker{display:inline-block;margin-bottom:1.1rem}
+  h1{font-size:clamp(2.1rem,5.5vw,3.4rem);line-height:1.05;letter-spacing:-.02em;margin:0 0 1rem;font-weight:750}
+  h1 .u{color:var(--accent)}
+  .lede{font-size:1.12rem;color:#4a4539;max-width:34rem;margin:0 0 1.6rem}
+  .cta-row{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center}
+  .cta-note{font-size:.82rem;color:var(--muted)}
+  @media(min-width:860px){ .hero{grid-template-columns:1.05fr .95fr} }
+
+  /* hero sketch panel */
+  .panel{background:var(--sheet);border:1px solid var(--line2);border-radius:12px;
+    box-shadow:0 1px 0 rgba(0,0,0,.02),0 18px 40px -24px rgba(38,35,29,.45);overflow:hidden}
+  .panel .bar{display:flex;align-items:center;gap:.4rem;padding:.55rem .75rem;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .panel .bar i{width:9px;height:9px;border-radius:50%;background:var(--line2);display:block}
+  .panel .bar .t{margin-left:.4rem;font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .canvas{position:relative;aspect-ratio:16/11;background:
+    linear-gradient(var(--line) 1px,transparent 1px) 0 0/100% 28px,
+    var(--sheet)}
+  .canvas svg{position:absolute;inset:0;width:100%;height:100%}
+  .tag{position:absolute;font-family:var(--mono);font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;
+    background:var(--ink);color:var(--paper);padding:.18rem .4rem;border-radius:4px}
+
+  /* strip */
+  .strip{border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);background:var(--panel)}
+  .strip .wrap{display:flex;flex-wrap:wrap;gap:.5rem 2rem;padding:.9rem 1.25rem;align-items:center;justify-content:center}
+  .strip span{font-family:var(--mono);font-size:.72rem;letter-spacing:.04em;color:var(--muted)}
+  .strip b{color:var(--ink)}
+
+  /* sections */
+  section{padding:4rem 0}
+  .head{max-width:40rem;margin:0 0 2.2rem}
+  .head h2{font-size:clamp(1.5rem,3.4vw,2rem);letter-spacing:-.01em;margin:.5rem 0 .5rem;font-weight:720}
+  .head p{color:var(--muted);margin:0;font-size:1.02rem}
+
+  .steps{display:grid;grid-template-columns:1fr;gap:1rem;counter-reset:s}
+  @media(min-width:720px){ .steps{grid-template-columns:repeat(3,1fr)} }
+  .step{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:1.3rem}
+  .step .n{font-family:var(--mono);font-size:.72rem;color:var(--accent);font-weight:700}
+  .step h3{margin:.5rem 0 .35rem;font-size:1.08rem}
+  .step p{margin:0;color:var(--muted);font-size:.94rem}
+
+  .grid{display:grid;grid-template-columns:1fr;gap:1rem}
+  @media(min-width:640px){ .grid{grid-template-columns:1fr 1fr} }
+  @media(min-width:960px){ .grid{grid-template-columns:repeat(3,1fr)} }
+  .card{background:var(--sheet);border:1px solid var(--line);border-radius:10px;padding:1.3rem}
+  .card .ic{width:34px;height:34px;color:var(--accent);margin-bottom:.7rem}
+  .card h3{margin:0 0 .3rem;font-size:1.02rem}
+  .card p{margin:0;color:var(--muted);font-size:.92rem}
+
+  /* callout */
+  .callout{background:var(--ink);color:var(--paper);border-radius:14px;padding:2.6rem 2rem;text-align:center}
+  .callout h2{font-size:clamp(1.5rem,3.6vw,2.1rem);margin:0 0 .6rem;letter-spacing:-.01em}
+  .callout p{color:#cfc7b5;max-width:34rem;margin:0 auto 1.4rem}
+  .callout .btn{background:var(--accent);border-color:var(--accent-ink);color:#fdfbf6}
+  .callout .btn:hover{background:#c85535}
+
+  footer{border-top:1px solid var(--line2);padding:2rem 0;margin-top:1rem}
+  .foot{display:flex;flex-wrap:wrap;gap:1rem;align-items:center;justify-content:space-between}
+  .foot .mono{font-size:.66rem}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <span class="brand">
+      <svg width="24" height="24" viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <path d="M30 78 L24 78 A8 8 0 0 1 16 70 L16 26 A8 8 0 0 1 24 18 L72 18 A8 8 0 0 1 80 26 L80 50"
+              stroke="#26231d" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M24 18 L72 18 A8 8 0 0 1 80 26 L80 30 L16 30 L16 26 A8 8 0 0 1 24 18 Z" fill="#b2482b"/>
+        <g stroke="#26231d" stroke-width="6.5" stroke-linecap="round">
+          <path d="M30 78 L46 78" opacity=".9"/><path d="M55 78 L64 78" opacity=".48"/><path d="M80 58 L80 67" opacity=".42"/>
+        </g>
+      </svg>
+      Conjure <span class="sub">sketch → app</span>
+    </span>
+    <span class="spacer"></span>
+    <a class="link" href="#how">How it works</a>
+    <a class="link" href="#features">Features</a>
+    <a class="btn primary" href="/">Start drawing</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <div>
+      <span class="kicker mono">Draw-to-app · no code · live</span>
+      <h1>Draw your app <span class="u">into being.</span></h1>
+      <p class="lede">Sketch a UI on paper, on a canvas, or <strong>right on top of your live app</strong> — and Conjure builds it into a real, working web app in seconds. You change it by marking it up, not by wrestling with prompts.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="/">Start drawing</a>
+        <a class="btn" href="#how">See how it works</a>
+        <span class="cta-note">Point a camera at a napkin. Watch it come alive.</span>
+      </div>
+    </div>
+
+    <div class="panel" aria-hidden="true">
+      <div class="bar"><i></i><i></i><i></i><span class="t">your sketch → live app</span></div>
+      <div class="canvas">
+        <span class="tag" style="left:8%;top:9%">draw</span>
+        <span class="tag" style="right:8%;bottom:9%;background:#b2482b">build ▸</span>
+        <svg viewBox="0 0 320 220" preserveAspectRatio="xMidYMid meet">
+          <!-- hand-drawn UI sketch -->
+          <g stroke="#26231d" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="40" y="34" width="240" height="150" rx="8"/>
+            <line x1="40" y1="62" x2="280" y2="62"/>
+            <circle cx="58" cy="48" r="6"/>
+            <line x1="150" y1="48" x2="270" y2="48" opacity=".5"/>
+            <rect x="60" y="82" width="120" height="46" rx="6"/>
+            <line x1="60" y1="140" x2="250" y2="140" opacity=".55"/>
+            <line x1="60" y1="154" x2="210" y2="154" opacity=".4"/>
+          </g>
+          <!-- filled-in (colored) button = accent -->
+          <g>
+            <rect x="196" y="86" width="66" height="34" rx="8" fill="#b2482b"/>
+            <text x="229" y="108" font-family="ui-monospace,Menlo,monospace" font-size="12" fill="#fdfbf6" text-anchor="middle">Go</text>
+          </g>
+          <!-- red annotation arrow -->
+          <g stroke="#c0392b" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M300 150 C280 150 274 128 262 118"/>
+            <path d="M262 118 l10 2 M262 118 l1 10"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <div class="strip">
+    <div class="wrap">
+      <span><b>Draw on the live app</b> — not a blank box</span>
+      <span><b>Camera</b> reads paper sketches</span>
+      <span><b>Multi-page</b> sites, auto-linked</span>
+      <span><b>Edits in seconds</b></span>
+    </div>
+  </div>
+
+  <section id="how" class="wrap">
+    <div class="head">
+      <span class="mono">How it works</span>
+      <h2>Three moves. That's the whole loop.</h2>
+      <p>No syntax to learn and no prompt to perfect — you point, draw, and press build.</p>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="n">01</div><h3>Draw on your app</h3><p>Turn on Markup and sketch your edits straight onto the running app — circle it, cross it out to delete, fill it in to recolor, or write a note. Colors carry meaning.</p></div>
+      <div class="step"><div class="n">02</div><h3>Build it</h3><p>Press Build and Conjure rebuilds from your markup — usually in seconds. Watch it think in the live terminal.</p></div>
+      <div class="step"><div class="n">03</div><h3>It's live</h3><p>Your working app updates in the preview. Close the tab and come back — builds keep running on the server.</p></div>
+    </div>
+  </section>
+
+  <section id="features" class="wrap" style="padding-top:1rem">
+    <div class="head">
+      <span class="mono">Features</span>
+      <h2>Built for people who think in pictures.</h2>
+      <p>Most tools want you to type. Conjure wants you to draw.</p>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l3.5-1L18 8.5 15.5 6 5 16.5 4 20z"/><path d="M14 7l3 3"/></svg>
+        <h3>Markup-to-edit</h3><p>Draw directly on the live app to change it. Circle, cross out, fill in, annotate — the app rebuilds from your marks.</p>
+      </div>
+      <div class="card">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="12" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M8 7l1.4-2h5.2L16 7"/></svg>
+        <h3>Paper, via camera</h3><p>Sketch on a napkin, point your camera, and Conjure captures it the moment your drawing holds still.</p>
+      </div>
+      <div class="card">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="7" width="12" height="14" rx="2"/><path d="M5 17V5a2 2 0 0 1 2-2h8"/></svg>
+        <h3>Multi-page sites</h3><p>Add pages that link themselves into the nav. Every edit lands on the page you're actually looking at.</p>
+      </div>
+      <div class="card">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 13h5l-1 8 9-11h-5z"/></svg>
+        <h3>Fast edits</h3><p>Small changes patch the file in place, so tweaks land in seconds instead of rebuilding everything.</p>
+      </div>
+      <div class="card">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="3.2"/></svg>
+        <h3>Designed, not sloppy</h3><p>An optimized design system is baked in — restrained palettes, real hierarchy, no generic "AI look".</p>
+      </div>
+      <div class="card">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>
+        <h3>Runs anywhere</h3><p>One self-contained file per app. Nothing to deploy to try an idea — it's live in the preview instantly.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="start" class="wrap">
+    <div class="callout">
+      <span class="mono" style="color:#e6c3b4">Start</span>
+      <h2>If you can draw it, you can build it.</h2>
+      <p>Grab a pen — real or on screen — and turn the picture in your head into a working app.</p>
+      <a class="btn" href="/">Start drawing</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand" style="font-size:.95rem">
+      <svg width="20" height="20" viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <path d="M30 78 L24 78 A8 8 0 0 1 16 70 L16 26 A8 8 0 0 1 24 18 L72 18 A8 8 0 0 1 80 26 L80 50" stroke="#26231d" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M24 18 L72 18 A8 8 0 0 1 80 26 L80 30 L16 30 L16 26 A8 8 0 0 1 24 18 Z" fill="#b2482b"/>
+      </svg>
+      Conjure
+    </span>
+    <span class="mono">Sketch → app · made on a Raspberry Pi</span>
+  </div>
+</footer>
+
+</body>
+</html>

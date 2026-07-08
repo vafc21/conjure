@@ -808,6 +808,15 @@ app.post('/auth', (req, res) => {
   res.status(401).type('html').send(gatePage(base, true));
 });
 
+// Public marketing homepage (ungated). "Start drawing" on it links to the gated
+// app at "/". Served from site/index.html.
+app.get(['/welcome', '/home'], (req, res) => {
+  const f = path.join(ROOT, 'site', 'index.html');
+  if (!fs.existsSync(f)) return res.status(404).type('text').send('no homepage');
+  res.type('html'); res.set('Cache-Control', 'public, max-age=300');
+  fs.createReadStream(f).pipe(res);
+});
+
 // Gate middleware: everything below requires a valid cookie.
 app.use((req, res, next) => {
   if (isAuthed(req)) return next();
