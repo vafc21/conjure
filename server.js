@@ -444,6 +444,7 @@ HOW TO APPLY CHANGES (this matters for speed — do it exactly):
 - Prefer several small, targeted edits over one big replacement. On a large file this is dramatically faster than re-emitting everything.
 - ONLY if app.html is the empty "Nothing built yet" placeholder (or is missing) may you create the whole file fresh with your Write tool.
 - When you finish, app.html on disk MUST be a complete, valid, self-contained HTML document starting with <!doctype html>. Never leave it half-edited or broken.
+- Touch ONLY app.html in your current working directory (and, when mentioned, Read the sketch image under frames/). Do NOT list, glob, or search the filesystem, do NOT open or create any other file, and never use a path outside this folder.
 - Print NOTHING to stdout — no prose, no HTML, no summary. The ONLY thing you may ever print is a single QUESTION:{...} line, and only in the genuine can't-proceed case described above (when asking, do not edit the file).`;
 }
 
@@ -515,11 +516,15 @@ function runClaudeStream(slug, prompt, term) {
     // (emitting only the changed lines) instead of re-printing the whole file —
     // small edits on a large app go from minutes to seconds. Exec / network /
     // agent tools stay disabled so it can't run commands or reach the internet.
+    // Filesystem EXPLORATION tools (Glob/Grep/LS) are also disabled: the model
+    // only needs to Read/Edit app.html and Read the given frame image, and letting
+    // it browse the tree causes "outside allowed folders" errors in the terminal.
     const args = [
       '-p', '--model', MODEL,
+      '--add-dir', projectDir(slug),
       '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
       '--permission-mode', 'bypassPermissions',
-      '--disallowedTools', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch', 'Task',
+      '--disallowedTools', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch', 'Task', 'Glob', 'Grep', 'LS',
     ];
     const child = spawn('claude', args, {
       cwd: projectDir(slug), env: process.env, stdio: ['pipe', 'pipe', 'pipe'],
@@ -582,7 +587,11 @@ function runClaudeStream(slug, prompt, term) {
         }
       } else if (ev.type === 'user' && ev.message && Array.isArray(ev.message.content)) {
         for (const b of ev.message.content) {
-          if (b.type === 'tool_result') term.event('tool_result', 'result', toolResultSnippet(b.content));
+          if (b.type === 'tool_result') {
+            const snip = toolResultSnippet(b.content);
+            if (b.is_error) { console.warn(`[update ${slug}] tool error: ${snip}`); term.event('note', 'note', 'a tool call was skipped; continuing'); }
+            else term.event('tool_result', 'result', snip);
+          }
         }
       } else if (ev.type === 'result') {
         if (typeof ev.result === 'string') resultText = ev.result;
