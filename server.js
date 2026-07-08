@@ -50,7 +50,15 @@ loadEnvFile(path.join(ROOT, '.env'));
 const PORT = process.env.PORT || 8091;
 const HOST = '0.0.0.0';
 const MODEL = process.env.CONJURE_MODEL || 'claude-sonnet-5';
-const CLAUDE_TIMEOUT_MS = parseInt(process.env.CONJURE_TIMEOUT_MS || '240000', 10);
+// Build watchdog: we do NOT hard-kill a long build. As long as the model keeps
+// streaming output it runs. Only after IDLE_MS of total silence do we probe the
+// runtime with a cheap Haiku call; if Haiku answers, the runtime is healthy and
+// the (quiet) Sonnet build is left alive; if it fails, the runtime is broken and
+// we stop. HARD_MAX_MS is a last-resort ceiling against a truly wedged process.
+const IDLE_MS = parseInt(process.env.CONJURE_IDLE_MS || process.env.CONJURE_TIMEOUT_MS || '150000', 10);
+const HARD_MAX_MS = parseInt(process.env.CONJURE_MAX_BUILD_MS || '1800000', 10); // 30 min
+const WATCH_TICK_MS = parseInt(process.env.CONJURE_WATCH_TICK_MS || '15000', 10);
+const PROBE_MODEL = process.env.CONJURE_PROBE_MODEL || 'haiku';
 const MAX_CONCURRENT = parseInt(process.env.CONJURE_MAX_CONCURRENT || '2', 10);
 
 const PASSPHRASE = process.env.CONJURE_PASSPHRASE || '';
@@ -477,6 +485,23 @@ function toolResultSnippet(content) {
   } catch (_) { return ''; }
 }
 
+// Cheap liveness probe: is the Claude CLI/runtime answering at all? Used only
+// when a build has gone silent, to tell "long build" apart from "runtime broken".
+function claudeHealthy(timeoutMs = 30000) {
+  return new Promise((resolve) => {
+    let done = false, out = '';
+    let child;
+    try {
+      child = spawn('claude', ['-p', '--model', PROBE_MODEL], { env: process.env, stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch (_) { resolve(false); return; }
+    const to = setTimeout(() => { if (done) return; done = true; try { child.kill('SIGKILL'); } catch (_) {} resolve(false); }, timeoutMs);
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.on('error', () => { if (done) return; done = true; clearTimeout(to); resolve(false); });
+    child.on('close', (code) => { if (done) return; done = true; clearTimeout(to); resolve(code === 0 && out.trim().length > 0); });
+    try { child.stdin.write('Reply with the single word OK.'); child.stdin.end(); } catch (_) {}
+  });
+}
+
 function runClaudeStream(slug, prompt, term) {
   return new Promise((resolve, reject) => {
     // Disallow every file-mutating / exec / network / agent tool so the model
@@ -499,12 +524,41 @@ function runClaudeStream(slug, prompt, term) {
     let err = '';
     let done = false;
 
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
+    // Activity-aware watchdog (see IDLE_MS/HARD_MAX_MS notes above). We never kill
+    // a build that is still streaming; a silent build is health-checked with Haiku
+    // and only stopped if the runtime itself is unresponsive.
+    const started = Date.now();
+    let lastActivity = Date.now();
+    let probing = false;
+    function finish(err2) {
+      if (done) return; done = true;
+      clearInterval(watchdog);
       try { child.kill('SIGKILL'); } catch (_) {}
-      reject(new Error(`claude timed out after ${CLAUDE_TIMEOUT_MS}ms`));
-    }, CLAUDE_TIMEOUT_MS);
+      reject(err2);
+    }
+    const watchdog = setInterval(async () => {
+      if (done) return;
+      const now = Date.now();
+      if (now - started > HARD_MAX_MS) {
+        term.event('error', 'watchdog', `build exceeded the ${Math.round(HARD_MAX_MS / 60000)}-min ceiling — stopping`);
+        finish(new Error(`build exceeded hard ceiling ${HARD_MAX_MS}ms`));
+        return;
+      }
+      if (probing || now - lastActivity < IDLE_MS) return;
+      probing = true;
+      const quietS = Math.round((now - lastActivity) / 1000);
+      term.event('note', 'watchdog', `no output for ${quietS}s — checking the runtime with ${PROBE_MODEL}…`);
+      const ok = await claudeHealthy();
+      if (done) return;
+      if (ok) {
+        term.event('note', 'watchdog', `runtime healthy (${PROBE_MODEL} answered) — the build is still working, keeping it alive`);
+        lastActivity = Date.now(); // grant another quiet window
+        probing = false;
+      } else {
+        term.event('error', 'watchdog', `runtime not responding (${PROBE_MODEL} probe failed) — stopping this build`);
+        finish(new Error(`claude runtime unresponsive (health probe failed after ${quietS}s of silence)`));
+      }
+    }, WATCH_TICK_MS);
 
     function route(ev) {
       if (!ev || !ev.type) return;
@@ -535,6 +589,7 @@ function runClaudeStream(slug, prompt, term) {
     }
 
     child.stdout.on('data', (d) => {
+      lastActivity = Date.now(); // any output = the model is working
       buf += d.toString();
       let idx;
       while ((idx = buf.indexOf('\n')) >= 0) {
@@ -543,12 +598,12 @@ function runClaudeStream(slug, prompt, term) {
         handleLine(line);
       }
     });
-    child.stderr.on('data', (d) => { err += d.toString(); });
-    child.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); reject(e); });
+    child.stderr.on('data', (d) => { err += d.toString(); lastActivity = Date.now(); });
+    child.on('error', (e) => { if (done) return; done = true; clearInterval(watchdog); reject(e); });
     child.on('close', (code) => {
       if (done) return;
       done = true;
-      clearTimeout(timer);
+      clearInterval(watchdog);
       if (buf.trim()) handleLine(buf); // flush any trailing partial line
       const out = resultText || assembledText;
       if (code !== 0 && !out.trim()) {
