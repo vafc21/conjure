@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <!-- a single ink gesture (curl) that squares off into an app frame -->
+  <path d="M20 70 c-5 -7 5 -14 10 -8 c4 5 -2 10 -6 7
+           M24 69 C34 44 40 34 52 30 L74 30 A6 6 0 0 1 80 36 L80 62 A6 6 0 0 1 74 68 L44 68"
+        fill="none" stroke="#26231d" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M52 30 L74 30 A6 6 0 0 1 80 36 L80 42 L54 42 Z" fill="#b2482b"/>
+</svg>

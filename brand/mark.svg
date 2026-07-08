@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Conjure">
+  <path d="M30 78 L24 78 A8 8 0 0 1 16 70 L16 26 A8 8 0 0 1 24 18 L72 18 A8 8 0 0 1 80 26 L80 50"
+        fill="none" stroke="#26231d" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 18 L72 18 A8 8 0 0 1 80 26 L80 30 L16 30 L16 26 A8 8 0 0 1 24 18 Z" fill="#b2482b"/>
+  <g stroke="#26231d" stroke-width="6.5" stroke-linecap="round">
+    <path d="M30 78 L46 78" opacity="0.9"/>
+    <path d="M55 78 L64 78" opacity="0.48"/>
+    <path d="M80 58 L80 67" opacity="0.42"/>
+  </g>
+</svg>
