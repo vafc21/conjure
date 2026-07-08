@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <!--
+    Direction C — The C Window Monogram (96×96)
+    Concept: The letter C formed as three sides of a window frame.
+    The opening on the right reveals a bold chevron/cursor in the
+    clay-red accent color, suggesting the next thing being generated.
+    The C reads both as "Conjure" and as a window awaiting content.
+  -->
+  <!-- C frame: top, left, and bottom sides of a window -->
+  <path d="M72 12 L24 12 A8 8 0 0 0 16 20 L16 76 A8 8 0 0 0 24 84 L72 84" stroke="#26231d" stroke-width="4" stroke-linecap="round"/>
+  <!-- Inner chevron at the opening — the "next thing" cursor -->
+  <path d="M74 38 L88 48 L74 58" stroke="#b2482b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

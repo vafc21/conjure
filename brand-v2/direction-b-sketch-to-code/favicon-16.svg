@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none">
+  <!-- Direction B favicon at 16×16 -->
+  <path d="M2 8 C4 6, 5 10, 7 8" stroke="#26231d" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M7 8 L11 5.5 L14 8 L11 10.5" stroke="#26231d" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

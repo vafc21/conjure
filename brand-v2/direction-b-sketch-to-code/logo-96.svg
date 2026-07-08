@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <!--
+    Direction B — The Sketch-to-Code Stroke (96×96)
+    Concept: A continuous horizontal mark. Left side is an organic,
+    gently undulating line (the sketch/drawing). It transitions at
+    the center into sharp geometric angles forming a code chevron
+    bracket on the right (the app/code). Left-to-right reads as
+    "drawing becomes code."
+  -->
+  <!-- Organic sketch stroke that sharpens into a code chevron -->
+  <path d="M8 52 C20 40, 30 58, 44 48" stroke="#26231d" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <path d="M44 48 L68 34 L84 48 L68 62" stroke="#26231d" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

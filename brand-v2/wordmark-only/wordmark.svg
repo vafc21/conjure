@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" fill="none">
+  <!--
+    Conjure Wordmark — text-only logo, no icon.
+    Uses Inter (or system fallback) with tight tracking.
+    The period after Conjure is deliberate — a visual full-stop
+    that also reads as a "dot" / terminal / command prompt.
+    Usage: black on light backgrounds, white on dark.
+  -->
+  <text x="180" y="62" text-anchor="middle"
+        font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="48" font-weight="600" fill="#26231d"
+        letter-spacing="-0.02em">Conjure<span font-weight="800" fill="#b2482b">.</span></text>
+</svg>

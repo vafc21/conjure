@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <!--
+    Direction A — Materializing Frame (96×96)
+    Concept: App window frame that dissolves into code/pixel dots.
+    The top-left corner is a solid frame; the bottom-right progressively
+    breaks apart into square pixels with increasing gaps, suggesting
+    a sketch materializing into a live app.
+  -->
+  <!-- Frame: top edge + top-right corner arc + right edge (solid portion) -->
+  <path d="M20 12 L76 12 A8 8 0 0 1 84 20 L84 48" stroke="#26231d" stroke-width="4" stroke-linecap="round"/>
+  <!-- Frame: left edge + bottom-left corner arc + bottom edge (solid portion) -->
+  <path d="M20 12 A8 8 0 0 0 12 20 L12 76 A8 8 0 0 0 20 84 L48 84" stroke="#26231d" stroke-width="4" stroke-linecap="round"/>
+  <!-- Dissolve dots — right edge, spacing increases -->
+  <rect x="80" y="54" width="4" height="4" fill="#26231d"/>
+  <rect x="80" y="62" width="4" height="4" fill="#26231d"/>
+  <rect x="80" y="72" width="4" height="4" fill="#26231d"/>
+  <!-- Dissolve dots — bottom edge, spacing increases -->
+  <rect x="54" y="80" width="4" height="4" fill="#26231d"/>
+  <rect x="62" y="80" width="4" height="4" fill="#26231d"/>
+  <rect x="72" y="80" width="4" height="4" fill="#26231d"/>
+  <!-- Corner scatter — the frame has fully dissolved into floating pixels -->
+  <rect x="80" y="80" width="4" height="4" fill="#26231d"/>
+  <rect x="84" y="68" width="4" height="4" fill="#26231d"/>
+</svg>

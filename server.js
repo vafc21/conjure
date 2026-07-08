@@ -84,24 +84,25 @@ function projectExists(slug) {
   return /^[a-z0-9-]+$/.test(slug) && fs.existsSync(metaFile(slug));
 }
 
-function ensureProject(slug, name) {
+function ensureProject(slug, name, ownerId) {
   fs.mkdirSync(projectDir(slug), { recursive: true });
   fs.mkdirSync(framesDir(slug), { recursive: true });
   fs.mkdirSync(historyDir(slug), { recursive: true });
   if (!fs.existsSync(metaFile(slug))) {
     fs.writeFileSync(metaFile(slug), JSON.stringify({
       slug, name: name || slug, created: new Date().toISOString(),
+      ownerId: ownerId || null,
     }, null, 2));
   }
   if (!fs.existsSync(appFile(slug))) fs.writeFileSync(appFile(slug), seedApp());
   return slug;
 }
 
-function createProject(name) {
+function createProject(name, ownerId) {
   const base = slugify(name);
   let slug = base, i = 2;
   while (fs.existsSync(projectDir(slug))) slug = `${base}-${i++}`;
-  ensureProject(slug, name && name.trim() ? name.trim() : slug);
+  ensureProject(slug, name && name.trim() ? name.trim() : slug, ownerId || null);
   return readProject(slug);
 }
 
@@ -110,16 +111,53 @@ function readProject(slug) {
   try { meta = JSON.parse(fs.readFileSync(metaFile(slug), 'utf8')); } catch (_) {}
   let updated = 0;
   try { updated = fs.statSync(appFile(slug)).mtimeMs; } catch (_) {}
-  return { slug, name: meta.name || slug, created: meta.created || null, updated };
+  return {
+    slug, name: meta.name || slug, created: meta.created || null, updated,
+    ownerId: meta.ownerId || null, built: !!meta.built,
+  };
 }
 
-function listProjects() {
+// Mark a project as having produced at least one real (non-seed) app build.
+// Client uses this to decide sketch (bootstrap) vs markup (annotate-over-app).
+function markBuilt(slug) {
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaFile(slug), 'utf8'));
+    if (!meta.built) { meta.built = true; fs.writeFileSync(metaFile(slug), JSON.stringify(meta, null, 2)); }
+  } catch (_) {}
+}
+
+// ---------------------------------------------------------------------------
+// Ownership: an anonymous per-browser id (localStorage) partitions projects.
+// This is NOT a security boundary (the passphrase gate is) — it just keeps each
+// visitor's project list separate. A caller may only see/touch projects whose
+// meta.ownerId equals their id.
+// ---------------------------------------------------------------------------
+function ownerOf(slug) {
+  try { return JSON.parse(fs.readFileSync(metaFile(slug), 'utf8')).ownerId || null; }
+  catch (_) { return null; }
+}
+function ownsProject(slug, uid) {
+  return !!uid && projectExists(slug) && ownerOf(slug) === uid;
+}
+
+// A caller's projects only (empty when no/unknown uid). Legacy/unowned projects
+// are intentionally invisible here — the sweep relocates them to .trash.
+function listProjects(uid) {
+  if (!uid) return [];
   let dirs = [];
   try { dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true }); } catch (_) {}
   return dirs
     .filter((d) => d.isDirectory() && projectExists(d.name))
     .map((d) => readProject(d.name))
+    .filter((p) => p.ownerId === uid)
     .sort((a, b) => b.updated - a.updated);
+}
+
+// Count every project on disk (diagnostic only — not owner-scoped).
+function countProjects() {
+  let dirs = [];
+  try { dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true }); } catch (_) {}
+  return dirs.filter((d) => d.isDirectory() && projectExists(d.name)).length;
 }
 
 // One-time migration: legacy single-workspace files → projects/scratchpad.
@@ -144,7 +182,47 @@ function migrateLegacy() {
   } catch (e) { console.error('[migrate] ', e && e.message); }
 }
 migrateLegacy();
-ensureProject('scratchpad', 'Scratchpad'); // guarantee a default always exists
+// No global default project anymore: each visitor gets their own owned
+// "Scratchpad" created client-side on first load (projects are per-owner now).
+
+// ---------------------------------------------------------------------------
+// Non-destructive sweep: relocate orphaned (no ownerId) and stale (untouched
+// 30+ days) projects to workspace/.trash — NEVER delete. Runs on start + daily.
+// ---------------------------------------------------------------------------
+const STALE_MS = 30 * 24 * 60 * 60 * 1000;
+function trashProject(slug, reason) {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const dest = path.join(TRASH_DIR, `${ts}-${slug}`);
+  try {
+    fs.renameSync(projectDir(slug), dest);
+  } catch (e) {
+    console.error(`[sweep] could not trash ${slug}:`, e && e.message);
+    return false;
+  }
+  queues.delete(slug); statusByProject.delete(slug);
+  console.log(`[sweep] ${slug} → .trash/${path.basename(dest)} (${reason})`);
+  return true;
+}
+function sweepProjects() {
+  let dirs = [];
+  try { dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true }); } catch (_) {}
+  const now = Date.now();
+  let trashed = 0;
+  for (const d of dirs) {
+    if (!d.isDirectory() || !projectExists(d.name)) continue;
+    const slug = d.name;
+    const st = queues.get(slug);
+    if (st && (st.running || st.pending)) continue; // never trash active work
+    const owner = ownerOf(slug);
+    let updated = 0;
+    try { updated = fs.statSync(appFile(slug)).mtimeMs; } catch (_) {}
+    if (!owner) { if (trashProject(slug, 'no ownerId')) trashed++; continue; }
+    if (updated && (now - updated) > STALE_MS) { if (trashProject(slug, 'stale 30d+')) trashed++; }
+  }
+  console.log(trashed
+    ? `[sweep] relocated ${trashed} project(s) to .trash`
+    : '[sweep] nothing to relocate');
+}
 
 function seedApp() {
   return `<!doctype html>
@@ -162,15 +240,26 @@ function seedApp() {
   code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f8f4ec;
     border:1px solid #d3c8b4;border-radius:4px;padding:.05rem .35rem;color:#26231d}
 </style></head>
-<body><div class="wrap">
+<body data-conjure-seed="1"><div class="wrap">
   <svg class="mark" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M12.5 2.5l3 3-8.5 8.5-3.7 .7 .7-3.7 8.5-8.5z"/><path d="M10.7 4.3l3 3"/>
   </svg>
   <h1>Nothing built yet</h1>
-  <p>Point the camera at a paper sketch or draw on the canvas, add a note if you like,
-     and press <code>Build it</code>. This panel becomes your working app.</p>
+  <p>Turn on <code>✎ Markup</code> and draw the UI you want right here — or point the
+     camera at a paper sketch. Add a note if you like, then press <code>Build</code>.
+     This panel becomes your working app.</p>
 </div></body></html>`;
+}
+
+// Shown in the preview iframe when the requested project isn't the caller's.
+function notFoundApp() {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Not found</title>
+<style>html,body{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+display:flex;align-items:center;justify-content:center;background:#e7e0d2;color:#7c7566;text-align:center}
+p{max-width:320px;line-height:1.5;font-size:.9rem}</style></head>
+<body><p>This project isn't in your workspace. Pick one from the project menu or create a new one.</p></body></html>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,9 +318,9 @@ async function runUpdate(slug, job) {
   }
 
   const current = fs.existsSync(appFile(slug)) ? fs.readFileSync(appFile(slug), 'utf8') : '';
-  const prompt = buildPrompt(current, job.notes || [], frameName);
+  const prompt = buildPrompt(current, job.notes || [], frameName, job.kind);
 
-  setStatus(slug, 'conjuring', framePath ? 'interpreting sketch…' : 'applying notes…');
+  setStatus(slug, 'conjuring', framePath ? (job.kind === 'markup' ? 'reading your markup…' : 'interpreting sketch…') : 'applying notes…');
   console.log(`[update ${slug}] ${ts} image=${!!framePath} notes=${(job.notes || []).length}`);
 
   const term = makeTermEmitter(slug);
@@ -266,6 +355,7 @@ async function runUpdate(slug, job) {
 
   fs.writeFileSync(appFile(slug), html);
   fs.writeFileSync(path.join(historyDir(slug), `${ts}.html`), html);
+  markBuilt(slug);
   console.log(`[update ${slug}] ${ts} wrote app.html (${html.length} bytes)`);
   broadcastProject(slug, { type: 'term', kind: 'done', label: 'done', snippet: `wrote ${html.length} bytes` });
   setStatus(slug, 'updated', 'app updated');
@@ -275,13 +365,15 @@ async function runUpdate(slug, job) {
 // ---------------------------------------------------------------------------
 // Prompt
 // ---------------------------------------------------------------------------
-function buildPrompt(current, notes, frameName) {
+function buildPrompt(current, notes, frameName, kind) {
   const noteBlock = notes && notes.length
     ? notes.map((n, i) => `  ${i + 1}. ${n}`).join('\n')
     : '  (none)';
 
   const imgLine = frameName
-    ? `A new sketch image is on disk at:\n  frames/${frameName}\nUse your Read tool to view that image file. It is the newest sketch/photo describing the desired UI.`
+    ? (kind === 'markup'
+      ? `A new image is on disk at:\n  frames/${frameName}\nUse your Read tool to view it. It is a SCREENSHOT of the CURRENT running app with the user's hand-drawn markup drawn directly ON TOP of it (pen strokes, circles, arrows, elements crossed/scribbled out, and written words). Treat the markup as edit instructions applied to the app shown beneath it: an X or scribble struck THROUGH an element means DELETE that element; a circle or arrow points at what to change, add, or move; written words are new labels/text or instructions about the thing they sit next to; colors carry meaning. Apply those marked changes to the CURRENT app.html below and preserve everything that was NOT marked.`
+      : `A new sketch image is on disk at:\n  frames/${frameName}\nUse your Read tool to view that image file. It is the newest sketch/photo describing the desired UI.`)
     : `There is no new sketch image this time — apply ONLY the notes below.`;
 
   return `You maintain a single-file web app (app.html) whose specification is a sketch (a photo of paper OR a digital drawing) plus optional typed/spoken notes.
@@ -534,11 +626,26 @@ function isAuthed(req) {
   return verifyToken(cookies[COOKIE_NAME]);
 }
 
+// The anonymous owner id: an "X-Conjure-Uid" header (fetch/XHR) or a "uid" query
+// param (iframe src, download links, image loads, WS upgrade). Constrained to a
+// safe charset so it can never influence a filesystem path.
+function callerUid(req) {
+  let uid = req.headers && req.headers['x-conjure-uid'];
+  if (Array.isArray(uid)) uid = uid[0];
+  if (!uid) {
+    try { uid = new URL(req.url, 'http://localhost').searchParams.get('uid'); } catch (_) {}
+  }
+  uid = String(uid || '').trim();
+  return /^[A-Za-z0-9_-]{8,64}$/.test(uid) ? uid : '';
+}
+
 function gatePage(base, error) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Conjure — locked</title>
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/brand/favicon-16.svg" sizes="16x16">
 <style>
   :root{--paper:#e7e0d2;--panel2:#f8f4ec;--sheet:#fdfbf6;--line:#d3c8b4;--line2:#c3b79e;
     --ink:#26231d;--muted:#7c7566;--accent:#b2482b;--accent-ink:#8f3820;--danger:#a3372a;
@@ -565,8 +672,12 @@ function gatePage(base, error) {
 <body>
   <form method="POST" action="${base}auth">
     <span class="logo" aria-hidden="true">
-      <svg width="22" height="22" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12.5 2.5l3 3-8.5 8.5-3.7 .7 .7-3.7 8.5-8.5z"/><path d="M10.7 4.3l3 3"/>
+      <svg width="22" height="22" viewBox="0 0 96 96" fill="none">
+        <path d="M30 78 L24 78 A8 8 0 0 1 16 70 L16 26 A8 8 0 0 1 24 18 L72 18 A8 8 0 0 1 80 26 L80 50" stroke="currentColor" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M24 18 L72 18 A8 8 0 0 1 80 26 L80 30 L16 30 L16 26 A8 8 0 0 1 24 18 Z" fill="currentColor"/>
+        <g stroke="currentColor" stroke-width="6.5" stroke-linecap="round">
+          <path d="M30 78 L46 78" opacity=".9"/><path d="M55 78 L64 78" opacity=".48"/><path d="M80 58 L80 67" opacity=".42"/>
+        </g>
       </svg>
     </span>
     <h1>Conjure</h1>
@@ -626,22 +737,24 @@ app.use((req, res, next) => {
 
 // ---- authed routes ----
 app.get(['/health', '/api/health'], (req, res) => {
-  res.json({ ok: true, model: MODEL, active, maxConcurrent: MAX_CONCURRENT, projects: listProjects().length });
+  res.json({ ok: true, model: MODEL, active, maxConcurrent: MAX_CONCURRENT, projects: countProjects() });
 });
 
-app.get('/projects', (req, res) => res.json({ ok: true, projects: listProjects() }));
+app.get('/projects', (req, res) => res.json({ ok: true, projects: listProjects(callerUid(req)) }));
 
 app.post('/projects', (req, res) => {
+  const uid = callerUid(req);
+  if (!uid) return res.status(400).json({ ok: false, error: 'missing user id' });
   const name = (req.body && req.body.name) || '';
   if (!name.trim()) return res.status(400).json({ ok: false, error: 'name required' });
-  const p = createProject(name);
+  const p = createProject(name, uid);
   res.json({ ok: true, project: p });
 });
 
 app.post('/projects/:slug/rename', (req, res) => {
   const slug = req.params.slug;
   const name = ((req.body && req.body.name) || '').trim();
-  if (!projectExists(slug)) return res.status(404).json({ ok: false, error: 'no such project' });
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
   if (!name) return res.status(400).json({ ok: false, error: 'name required' });
   try {
     const meta = JSON.parse(fs.readFileSync(metaFile(slug), 'utf8'));
@@ -653,24 +766,27 @@ app.post('/projects/:slug/rename', (req, res) => {
 
 app.delete('/projects/:slug', (req, res) => {
   const slug = req.params.slug;
-  if (!projectExists(slug)) return res.status(404).json({ ok: false, error: 'no such project' });
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   try {
-    fs.renameSync(projectDir(slug), path.join(TRASH_DIR, `${slug}-${ts}`)); // never rm
+    fs.renameSync(projectDir(slug), path.join(TRASH_DIR, `${ts}-${slug}`)); // never rm
   } catch (e) { return res.status(500).json({ ok: false, error: 'delete failed' }); }
   queues.delete(slug); statusByProject.delete(slug);
-  if (listProjects().length === 0) ensureProject('scratchpad', 'Scratchpad');
+  // No global fallback project: the client recreates a Scratchpad if this was
+  // the caller's last project.
   res.json({ ok: true });
 });
 
 app.get('/status', (req, res) => {
-  const slug = req.query.project || 'scratchpad';
+  const slug = req.query.project;
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ state: 'idle', detail: 'no such project' });
   res.json(getStatus(slug));
 });
 
 // The generated app, per project, served cache-busted for the preview iframe.
 app.get('/app', (req, res) => {
-  const slug = projectExists(req.query.project) ? req.query.project : 'scratchpad';
+  const slug = req.query.project;
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).type('html').send(notFoundApp());
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.type('html');
   fs.createReadStream(appFile(slug)).pipe(res);
@@ -678,7 +794,8 @@ app.get('/app', (req, res) => {
 
 // Raw download for the Export button.
 app.get('/app.html', (req, res) => {
-  const slug = projectExists(req.query.project) ? req.query.project : 'scratchpad';
+  const slug = req.query.project;
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
   res.set('Content-Disposition', 'attachment; filename="app.html"');
   res.type('html');
   fs.createReadStream(appFile(slug)).pipe(res);
@@ -687,16 +804,42 @@ app.get('/app.html', (req, res) => {
 // Serve a submitted sketch frame (for the clarifying-question crop view).
 app.get('/frames/:slug/:file', (req, res) => {
   const { slug, file } = req.params;
-  if (!projectExists(slug) || !/^[\w.-]+\.png$/.test(file)) return res.status(404).end();
+  if (!ownsProject(slug, callerUid(req)) || !/^[\w.-]+\.png$/.test(file)) return res.status(404).end();
   const p = path.join(framesDir(slug), file);
   if (!p.startsWith(framesDir(slug)) || !fs.existsSync(p)) return res.status(404).end();
   res.type('png');
   fs.createReadStream(p).pipe(res);
 });
 
+// Import a user-supplied HTML file as the project's current app (draw-mode
+// "Import HTML"). Backs up the current app to history first.
+app.post('/import', (req, res) => {
+  const body = req.body || {};
+  const slug = body.project;
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
+  let html = (body && body.html) || '';
+  if (typeof html !== 'string' || !/<(?:!doctype|html)/i.test(html)) {
+    return res.status(400).json({ ok: false, error: 'not an HTML document' });
+  }
+  if (html.length > 5 * 1024 * 1024) html = html.slice(0, 5 * 1024 * 1024);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    if (fs.existsSync(appFile(slug))) {
+      fs.copyFileSync(appFile(slug), path.join(historyDir(slug), `${ts}-preimport.html`));
+    }
+    fs.writeFileSync(appFile(slug), html);
+    fs.writeFileSync(path.join(historyDir(slug), `${ts}.html`), html);
+  } catch (e) { return res.status(500).json({ ok: false, error: 'import failed' }); }
+  console.log(`[import ${slug}] wrote app.html (${html.length} bytes)`);
+  setStatus(slug, 'updated', 'imported HTML');
+  broadcastProject(slug, { type: 'reload' });
+  res.json({ ok: true });
+});
+
 app.post('/update', (req, res) => {
   const body = req.body || {};
-  const slug = projectExists(body.project) ? body.project : 'scratchpad';
+  const slug = body.project;
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
   let imageBuf = null;
   if (body.image && typeof body.image === 'string') {
     const b64 = body.image.replace(/^data:image\/\w+;base64,/, '');
@@ -708,7 +851,8 @@ app.post('/update', (req, res) => {
   if ((!imageBuf || !imageBuf.length) && notes.length === 0) {
     return res.status(400).json({ ok: false, error: 'need an image or at least one note' });
   }
-  enqueue(slug, { image: imageBuf, notes });
+  const kind = body.kind === 'markup' ? 'markup' : 'sketch';
+  enqueue(slug, { image: imageBuf, notes, kind });
   res.json({ ok: true, queued: true, project: slug });
 });
 
@@ -724,23 +868,27 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  let project = 'scratchpad';
+  const uid = callerUid(req);
+  let project = null;
   try {
     const u = new URL(req.url, 'http://localhost');
     const q = u.searchParams.get('project');
-    if (q && projectExists(q)) project = q;
+    if (ownsProject(q, uid)) project = q;
   } catch (_) {}
   wss.handleUpgrade(req, socket, head, (ws) => {
-    ws.project = project;
+    ws.uid = uid;
+    ws.project = project; // may be null until a valid subscribe arrives
     wss.emit('connection', ws, req);
   });
 });
 wss.on('connection', (ws) => {
-  const st = getStatus(ws.project);
-  try { ws.send(JSON.stringify({ type: 'status', state: st.state, detail: st.detail })); } catch (_) {}
+  if (ws.project) {
+    const st = getStatus(ws.project);
+    try { ws.send(JSON.stringify({ type: 'status', state: st.state, detail: st.detail })); } catch (_) {}
+  }
   ws.on('message', (data) => {
     let msg; try { msg = JSON.parse(data.toString()); } catch (_) { return; }
-    if (msg && msg.type === 'subscribe' && projectExists(msg.project)) {
+    if (msg && msg.type === 'subscribe' && ownsProject(msg.project, ws.uid)) {
       ws.project = msg.project;
       const s = getStatus(msg.project);
       try { ws.send(JSON.stringify({ type: 'status', state: s.state, detail: s.detail })); } catch (_) {}
@@ -759,4 +907,6 @@ function broadcastProject(slug, obj) {
 
 server.listen(PORT, HOST, () => {
   console.log(`Conjure v2 listening on http://${HOST}:${PORT}  (model: ${MODEL}, gate: ${PASSPHRASE ? 'on' : 'OFF'})`);
+  sweepProjects(); // relocate orphaned/stale projects on start …
+  setInterval(sweepProjects, 24 * 60 * 60 * 1000); // … and once a day
 });

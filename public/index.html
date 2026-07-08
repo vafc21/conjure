@@ -81,19 +81,40 @@
   .switch{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.72rem;color:var(--muted)}
   .switch input{accent-color:var(--accent);width:18px;height:18px}
   /* marker palette */
-  .markers{display:flex;gap:.35rem;align-items:center}
-  .swatch{width:26px;height:26px;min-width:26px;border-radius:50%;border:2px solid var(--sheet);
+  .markers{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap}
+  .swatch{width:24px;height:24px;min-width:24px;border-radius:50%;border:2px solid var(--sheet);
     box-shadow:0 0 0 1px var(--line2);cursor:pointer;padding:0}
   .swatch.on{box-shadow:0 0 0 2px var(--accent)}
-  .swatch.black{background:var(--mark-black)} .swatch.red{background:var(--mark-red)}
-  .swatch.blue{background:var(--mark-blue)} .swatch.green{background:var(--mark-green)}
+  /* brush sizes */
+  .sizes{display:flex;gap:.3rem;align-items:center}
+  .sizedot{width:28px;height:28px;min-width:28px;border-radius:6px;border:1px solid var(--line2);
+    background:var(--sheet);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+  .sizedot i{display:block;border-radius:50%;background:var(--ink)}
+  .sizedot.on{border-color:var(--accent);background:#f3e7de}
+
+  /* ---------- draw-on-the-app markup overlay + floating toolbar ---------- */
+  #inkOverlay{position:absolute;inset:0;width:100%;height:100%;z-index:5;
+    touch-action:none;pointer-events:none;cursor:crosshair}
+  body.markup-on #inkOverlay{pointer-events:auto}
+  body.markup-on #preview{pointer-events:none}
+  .marktools{position:absolute;left:.6rem;top:.6rem;z-index:8;display:flex;flex-wrap:wrap;
+    align-items:center;gap:.35rem;padding:.4rem;background:rgba(239,233,221,.97);
+    border:1px solid var(--line2);border-radius:9px;box-shadow:0 4px 16px rgba(0,0,0,.16);
+    max-width:calc(100% - 1.2rem)}
+  .marktools .grp{display:none;align-items:center;gap:.35rem;flex-wrap:wrap}
+  body.markup-on .marktools .grp{display:flex}
+  .marktools .sep{width:1px;align-self:stretch;background:var(--line2);margin:0 .1rem}
+  .marktools input.note{width:150px;max-width:38vw;background:var(--sheet);border:1px solid var(--line2);
+    border-radius:5px;padding:.4rem .5rem;font:inherit;font-size:16px;color:var(--ink)}
+  .marktools input.note:focus{outline:none;border-color:var(--accent)}
+  .markhint{position:absolute;right:.6rem;bottom:.6rem;z-index:8;background:var(--ink);color:var(--paper);
+    font-family:var(--mono);font-size:.66rem;letter-spacing:.04em;padding:.32rem .55rem;border-radius:5px;display:none}
+  body.markup-on .markhint{display:block}
+  .mob-only{display:none}
   /* camera */
   video{width:100%;border-radius:5px;background:#111;display:block}
   .diffbar{height:6px;background:var(--sheet);border:1px solid var(--line);border-radius:3px;overflow:hidden;margin-top:.5rem}
   .diffbar>div{height:100%;width:0;background:var(--accent);transition:width .2s}
-  /* canvas */
-  .sketchwrap{position:relative;background:#fff;border:1px solid var(--line2);border-radius:5px;overflow:hidden;touch-action:none}
-  #sketch{display:block;width:100%;height:auto;cursor:crosshair;touch-action:none}
   .notes-queue{display:flex;flex-direction:column;gap:.3rem}
   .note-chip{background:var(--sheet);border:1px solid var(--line);border-radius:5px;padding:.35rem .5rem;
     font-size:.78rem;display:flex;gap:.4rem;align-items:center}
@@ -173,6 +194,7 @@
     .statusbar{display:none}       /* mobile uses the slim bar instead */
     body.show-app .statusbar{display:none}
     .terminal{height:40%}
+    .mob-only{display:inline-flex}
   }
   @media (min-width:821px){ .mobilebar{display:none} }
 </style>
@@ -209,38 +231,20 @@
     <!-- ============ LEFT: CONTROLS ============ -->
     <section class="left">
       <div class="tabs">
-        <button class="tab active" data-mode="canvas">Canvas</button>
+        <button class="tab active" data-mode="markup">Markup</button>
         <button class="tab" data-mode="camera">Camera</button>
       </div>
 
-      <!-- CANVAS MODE -->
-      <div class="pane active" data-pane="canvas">
+      <!-- MARKUP MODE — draw directly on the live app in the preview -->
+      <div class="pane active" data-pane="markup">
         <div class="card">
-          <div class="row" style="justify-content:space-between">
-            <div class="markers" role="group" aria-label="Marker color">
-              <button class="swatch black on" data-color="#1b1b1b" title="Black" aria-label="Black marker"></button>
-              <button class="swatch red" data-color="#c0392b" title="Red" aria-label="Red marker"></button>
-              <button class="swatch blue" data-color="#2b5fb2" title="Blue" aria-label="Blue marker"></button>
-              <button class="swatch green" data-color="#2f7d3f" title="Green" aria-label="Green marker"></button>
-              <button class="btn tool" id="toolErase">Eraser</button>
-              <button class="btn tool ghost" id="toolClear">Clear</button>
-            </div>
-            <label class="switch"><input type="checkbox" id="autoCanvas" checked> auto‑build</label>
+          <div class="row"><strong style="font-size:.98rem">Draw right on your app</strong></div>
+          <p class="hint" style="margin:.55rem 0 0">Your app is live in the preview. Hit <b>✎ Markup</b> on it, then draw your edits straight onto it — circle what to change, cross out (<b>✗</b>) what to delete, add an arrow, write a label. Colors carry meaning. Press <b>Build</b> and it rebuilds from your markup.</p>
+          <p class="hint" style="margin:.45rem 0 0">Brand-new project with nothing built yet? Just draw the UI you want — your first Build turns the drawing into the app.</p>
+          <div class="row" style="margin-top:.75rem">
+            <button class="btn primary mob-only" id="openApp">Open the app to draw</button>
+            <button class="btn primary" id="buildMarkup">Build from markup</button>
           </div>
-          <div class="sketchwrap" style="margin-top:.6rem">
-            <canvas id="sketch" width="720" height="520"></canvas>
-          </div>
-          <p class="hint" style="margin:.5rem 0 0">Draw your UI. Colors carry meaning — a red note reads as an instruction. Boxes = containers, words = labels, ✗ through something = delete it. Builds ~2.5s after you stop, or press the button.</p>
-        </div>
-
-        <div class="card">
-          <label class="fld" for="canvasNote">Instructions (optional)</label>
-          <textarea id="canvasNote" placeholder="e.g. a todo app with a dark header and a progress bar"></textarea>
-          <div class="row" style="margin-top:.6rem">
-            <button class="btn primary" id="conjureCanvas">Build it</button>
-            <button class="btn" id="voiceCanvas">Voice</button>
-          </div>
-          <div class="notes-queue" id="voiceQueueCanvas" style="margin-top:.5rem"></div>
         </div>
       </div>
 
@@ -292,6 +296,38 @@
 
       <div class="frame">
         <iframe id="preview" title="Generated app"></iframe>
+        <canvas id="inkOverlay"></canvas>
+        <div class="marktools" id="markTools">
+          <button class="btn tool" id="penToggle" title="Toggle drawing on the app">✎ Markup</button>
+          <span class="grp">
+            <span class="sep"></span>
+            <span class="markers" role="group" aria-label="Marker color">
+              <button class="swatch on" data-color="#1b1b1b" style="background:#1b1b1b" title="Black"></button>
+              <button class="swatch" data-color="#c0392b" style="background:#c0392b" title="Red"></button>
+              <button class="swatch" data-color="#d35400" style="background:#d35400" title="Orange"></button>
+              <button class="swatch" data-color="#c8951b" style="background:#c8951b" title="Amber"></button>
+              <button class="swatch" data-color="#2f7d3f" style="background:#2f7d3f" title="Green"></button>
+              <button class="swatch" data-color="#147d76" style="background:#147d76" title="Teal"></button>
+              <button class="swatch" data-color="#2b5fb2" style="background:#2b5fb2" title="Blue"></button>
+              <button class="swatch" data-color="#c0397e" style="background:#c0397e" title="Pink"></button>
+            </span>
+            <span class="sep"></span>
+            <span class="sizes" role="group" aria-label="Brush size">
+              <button class="sizedot" data-size="3" title="Thin"><i style="width:4px;height:4px"></i></button>
+              <button class="sizedot on" data-size="6" title="Medium"><i style="width:8px;height:8px"></i></button>
+              <button class="sizedot" data-size="11" title="Thick"><i style="width:13px;height:13px"></i></button>
+            </span>
+            <span class="sep"></span>
+            <button class="btn tool" id="toolErase">Erase</button>
+            <button class="btn tool ghost" id="toolUndo">Undo</button>
+            <button class="btn tool ghost" id="toolClear">Clear</button>
+            <span class="sep"></span>
+            <input class="note" id="markNote" type="text" placeholder="note (optional)" aria-label="Note for this build">
+            <button class="btn tool" id="voiceMarkup">Voice</button>
+            <button class="btn primary" id="buildMarkupFloat" style="min-height:38px;padding:.45rem .8rem">Build ▸</button>
+          </span>
+        </div>
+        <div class="markhint">markup on — drawing over your app</div>
         <div class="shimmer" id="shimmer"><span class="badge">Working…</span></div>
       </div>
 
@@ -312,11 +348,11 @@
 <!-- onboarding (mobile first-visit) -->
 <div class="overlay" id="onboard">
   <div class="sheet">
-    <h2>Is your camera set up?</h2>
-    <p>Conjure can watch a paper sketch through your camera, or you can draw directly on a canvas. Pick how you want to start.</p>
+    <h2>How do you want to start?</h2>
+    <p>Conjure can watch a paper sketch through your camera, or you can draw your edits directly on the app in the preview. Pick how you want to start.</p>
     <div class="actions">
-      <button class="btn primary" id="onbYes">Yes — use camera</button>
-      <button class="btn" id="onbNo">No — draw on canvas</button>
+      <button class="btn primary" id="onbYes">Use camera</button>
+      <button class="btn" id="onbNo">Draw on the app</button>
     </div>
   </div>
 </div>
@@ -339,6 +375,7 @@
 
 <canvas id="scratch" width="64" height="64" style="display:none"></canvas>
 
+<script src="/vendor/html2canvas.min.js"></script>
 <script>
 (function(){
   'use strict';
@@ -354,6 +391,27 @@
     set:function(k,v){ try{ localStorage.setItem(k,v); }catch(_){ } }
   };
 
+  // Anonymous per-browser owner id. Survives the passphrase cookie and is
+  // independent of it; clearing browser storage yields a new id (= a fresh,
+  // empty project list, by design). It is an ownership partition, not a secret.
+  var UID = (function(){
+    var k='conjure_uid', v=LS.get(k,'');
+    if(!/^[A-Za-z0-9_-]{8,64}$/.test(v)){
+      v = ('u-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12)).replace(/[^A-Za-z0-9_-]/g,'');
+      LS.set(k, v);
+    }
+    return v;
+  })();
+  // fetch() with the owner id header attached (for XHR/JSON calls).
+  function apiFetch(p, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers, { 'X-Conjure-Uid': UID });
+    return fetch(api(p), opts);
+  }
+  // Append the owner id as a query param (for iframe src, downloads, <img>, WS —
+  // contexts that cannot send a custom header).
+  function withUid(url){ return url + (url.indexOf('?')>=0?'&':'?') + 'uid=' + encodeURIComponent(UID); }
+
   var $ = function(id){ return document.getElementById(id); };
   var preview=$('preview'), shimmer=$('shimmer');
   var dot=$('dot'), mobDot=$('mobDot'), statusText=$('statusText'), statusDetail=$('statusDetail');
@@ -361,6 +419,7 @@
 
   // ---------------- projects ----------------
   var projects=[], currentProject=LS.get('conjure_project','scratchpad');
+  var projectBuilt={}; // slug -> has produced at least one real (non-seed) build
   var projectSel=$('projectSel');
 
   function renderProjects(){
@@ -374,9 +433,20 @@
     $('mobName').textContent = cur? cur.name : 'Project';
   }
   function loadProjects(cb){
-    fetch(api('projects')).then(function(r){return r.json();}).then(function(j){
+    apiFetch('projects').then(function(r){return r.json();}).then(function(j){
       projects = (j&&j.projects)||[];
-      if(!projects.some(function(p){return p.slug===currentProject;}) && projects.length){
+      projects.forEach(function(p){ projectBuilt[p.slug]=!!p.built; });
+      if(projects.length===0){
+        // First load for this browser id (or the last project was deleted):
+        // create a default owned project so there is always somewhere to work.
+        apiFetch('projects',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({name:'Scratchpad'})}).then(function(r){return r.json();}).then(function(res){
+          if(res&&res.ok&&res.project){ projects=[res.project]; currentProject=res.project.slug; LS.set('conjure_project',currentProject); }
+          renderProjects(); if(cb) cb();
+        }).catch(function(){ renderProjects(); if(cb) cb(); });
+        return;
+      }
+      if(!projects.some(function(p){return p.slug===currentProject;})){
         currentProject=projects[0].slug;
       }
       renderProjects(); if(cb) cb();
@@ -395,7 +465,7 @@
 
   $('newProject').onclick=function(){
     var name=prompt('New project name:'); if(!name||!name.trim()) return;
-    fetch(api('projects'),{method:'POST',headers:{'Content-Type':'application/json'},
+    apiFetch('projects',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name:name.trim()})}).then(function(r){return r.json();}).then(function(j){
       if(j&&j.ok){ currentProject=j.project.slug; LS.set('conjure_project',currentProject);
         loadProjects(function(){ switchProjectHard(); }); }
@@ -405,19 +475,19 @@
   $('renameProject').onclick=function(){
     var cur=projects.filter(function(p){return p.slug===currentProject;})[0]; if(!cur) return;
     var name=prompt('Rename project:',cur.name); if(!name||!name.trim()) return;
-    fetch(api('projects/'+currentProject+'/rename'),{method:'POST',headers:{'Content-Type':'application/json'},
+    apiFetch('projects/'+currentProject+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name:name.trim()})}).then(function(r){return r.json();}).then(function(){ loadProjects(); });
   };
   $('deleteProject').onclick=function(){
     var cur=projects.filter(function(p){return p.slug===currentProject;})[0]; if(!cur) return;
     if(!confirm('Move project "'+cur.name+'" to trash? (recoverable in workspace/.trash)')) return;
-    fetch(api('projects/'+currentProject),{method:'DELETE'}).then(function(r){return r.json();}).then(function(){
+    apiFetch('projects/'+currentProject,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){
       currentProject=''; loadProjects(function(){ if(projects.length){ currentProject=projects[0].slug; LS.set('conjure_project',currentProject);} switchProjectHard(); });
     });
   };
 
   // ---------------- preview ----------------
-  function bust(){ return api('app')+'?project='+encodeURIComponent(currentProject)+'&t='+Date.now(); }
+  function bust(){ return api('app')+'?project='+encodeURIComponent(currentProject)+'&uid='+encodeURIComponent(UID)+'&t='+Date.now(); }
   function reloadPreview(){ preview.src=bust(); }
 
   // ---------------- status ----------------
@@ -468,13 +538,13 @@
   function connectWS(){
     if(ws){ try{ ws.onclose=null; ws.close(); }catch(_){} ws=null; }
     var proto=location.protocol==='https:'?'wss:':'ws:';
-    var url=proto+'//'+location.host+BASE+'ws?project='+encodeURIComponent(currentProject);
+    var url=proto+'//'+location.host+BASE+'ws?project='+encodeURIComponent(currentProject)+'&uid='+encodeURIComponent(UID);
     var sock;
     try{ sock=new WebSocket(url); }catch(e){ setTimeout(connectWS,2000); return; }
     ws=sock;
     sock.onmessage=function(ev){
       var msg; try{ msg=JSON.parse(ev.data); }catch(_){ return; }
-      if(msg.type==='reload'){ reloadPreview(); setState('updated'); onBuilt(); }
+      if(msg.type==='reload'){ projectBuilt[currentProject]=true; reloadPreview(); setState('updated'); onBuilt(); }
       else if(msg.type==='status'){
         if(msg.state==='conjuring') setState('conjuring',null,msg.detail);
         else if(msg.state==='error') setState('error','Error',msg.detail);
@@ -491,13 +561,13 @@
   // ---------------- commit ----------------
   var sending=false;
   var lastImage={}; // per-project last submitted data URL (for question re-submit)
-  function commit(imageDataUrl, notes){
+  function commit(imageDataUrl, notes, kind){
     if(sending) return;
     sending=true; setState('conjuring');
     if(imageDataUrl) lastImage[currentProject]=imageDataUrl;
     clearTerminal();
-    fetch(api('update'),{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ project:currentProject, image:imageDataUrl||null, notes:notes||[] })})
+    apiFetch('update',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ project:currentProject, image:imageDataUrl||null, notes:notes||[], kind:kind||'sketch' })})
       .then(function(r){return r.json();})
       .then(function(){ sending=false; })
       .catch(function(err){ sending=false; setState('error','Error',String(err)); });
@@ -512,7 +582,7 @@
   function showQuestion(msg){
     qData=msg; $('qText').textContent=msg.question||'Could you clarify?';
     var img=$('qCrop'); img.style.display='none';
-    if(msg.frameUrl){ drawCrop(api(msg.frameUrl), msg.bbox, img); }
+    if(msg.frameUrl){ drawCrop(withUid(api(msg.frameUrl)), msg.bbox, img); }
     $('qAnswer').value=''; qOverlay.classList.add('on'); setTimeout(function(){ try{$('qAnswer').focus();}catch(_){} },50);
   }
   function hideQuestion(){ qOverlay.classList.remove('on'); qData=null; }
@@ -540,7 +610,7 @@
     if(img){ commit(img,[note]); }
     else if(qData.frameUrl){
       // page was reloaded; fetch the stored frame and resubmit it
-      fetch(api(qData.frameUrl)).then(function(r){return r.blob();}).then(function(b){
+      apiFetch(qData.frameUrl).then(function(r){return r.blob();}).then(function(b){
         var fr=new FileReader(); fr.onload=function(){ commit(fr.result,[note]); }; fr.readAsDataURL(b);
       }).catch(function(){ commit(null,[note]); });
     } else { commit(null,[note]); }
@@ -573,8 +643,8 @@
       chip.appendChild(x); el.appendChild(chip);
     });
   }
-  var voiceCanvasStore=[], voiceCamStore=[];
-  makeVoice($('voiceCanvas'), function(t){ voiceCanvasStore.push(t); renderQueue($('voiceQueueCanvas'),voiceCanvasStore); });
+  var voiceCamStore=[];
+  makeVoice($('voiceMarkup'), function(t){ var n=$('markNote'); n.value=(n.value?n.value+' ':'')+t; });
   makeVoice($('voiceCam'), function(t){ voiceCamStore.push(t); renderQueue($('voiceQueueCam'),voiceCamStore); });
   makeVoice($('qVoice'), function(t){ $('qAnswer').value=($('qAnswer').value?$('qAnswer').value+' ':'')+t; });
 
@@ -590,12 +660,40 @@
     });
   });
 
-  // ================= CANVAS MODE =================
-  var sketch=$('sketch'), sctx=sketch.getContext('2d');
-  function clearCanvas(){ sctx.fillStyle='#fff'; sctx.fillRect(0,0,sketch.width,sketch.height); }
-  clearCanvas();
-  var tool='pen', penColor='#1b1b1b', drawing=false, dirtyStrokes=false, lastX=0, lastY=0;
+  // ================= MARKUP MODE (draw directly on the live app) =================
+  var overlay=$('inkOverlay'), octx=overlay.getContext('2d');
+  var DPR=Math.max(1, window.devicePixelRatio||1);
+  var tool='pen', penColor='#1b1b1b', penSize=6, drawing=false, lastX=0, lastY=0;
+  var undoStack=[], markupOn=false;
 
+  // Size the overlay to the visible preview frame (device-pixel crisp), keeping
+  // any ink already drawn by re-scaling the previous bitmap onto the new size.
+  function sizeOverlay(){
+    var f=document.querySelector('.frame'); if(!f) return;
+    var w=f.clientWidth, h=f.clientHeight; if(!w||!h) return;
+    var prevURL=null;
+    if(overlay.width && inkPresent()){ try{ prevURL=overlay.toDataURL(); }catch(_){} }
+    overlay.style.width=w+'px'; overlay.style.height=h+'px';
+    overlay.width=Math.round(w*DPR); overlay.height=Math.round(h*DPR);
+    octx.setTransform(DPR,0,0,DPR,0,0); octx.lineCap='round'; octx.lineJoin='round';
+    if(prevURL){ var im=new Image(); im.onload=function(){ octx.save(); octx.setTransform(1,0,0,1,0,0);
+      octx.drawImage(im,0,0,overlay.width,overlay.height); octx.restore(); }; im.src=prevURL; }
+  }
+  window.addEventListener('resize', sizeOverlay);
+  preview.addEventListener('load', function(){ setMarkup(false); sizeOverlay(); });
+
+  function inkPresent(){
+    try{ var d=octx.getImageData(0,0,overlay.width,overlay.height).data;
+      for(var i=3;i<d.length;i+=4){ if(d[i]!==0) return true; } }catch(_){ }
+    return false;
+  }
+  function pushUndo(){ try{ undoStack.push(octx.getImageData(0,0,overlay.width,overlay.height));
+    if(undoStack.length>12) undoStack.shift(); }catch(_){} }
+  function restore(img){ octx.save(); octx.setTransform(1,0,0,1,0,0);
+    octx.clearRect(0,0,overlay.width,overlay.height); if(img) octx.putImageData(img,0,0); octx.restore(); }
+  function clearInk(){ restore(null); undoStack.length=0; }
+
+  // ---- tools ----
   var swatches=document.querySelectorAll('.swatch');
   swatches.forEach(function(sw){
     sw.addEventListener('click',function(){
@@ -604,54 +702,104 @@
       $('toolErase').classList.remove('on');
     });
   });
-  $('toolErase').onclick=function(){ tool='erase'; $('toolErase').classList.add('on'); swatches.forEach(function(s){s.classList.remove('on');}); };
-  $('toolClear').onclick=function(){ clearCanvas(); dirtyStrokes=false; };
+  var sizeBtns=document.querySelectorAll('.sizedot');
+  sizeBtns.forEach(function(b){
+    b.addEventListener('click',function(){
+      penSize=parseInt(b.getAttribute('data-size'),10)||6;
+      sizeBtns.forEach(function(s){s.classList.remove('on');}); b.classList.add('on');
+    });
+  });
+  $('toolErase').onclick=function(){ tool= tool==='erase'?'pen':'erase';
+    $('toolErase').classList.toggle('on', tool==='erase');
+    if(tool==='erase') swatches.forEach(function(s){s.classList.remove('on');}); };
+  $('toolUndo').onclick=function(){ if(undoStack.length) restore(undoStack.pop()); };
+  $('toolClear').onclick=clearInk;
 
-  function posFromEvent(e){
-    var r=sketch.getBoundingClientRect();
-    var cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;
-    var cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
-    return { x:cx*(sketch.width/r.width), y:cy*(sketch.height/r.height) };
+  function setMarkup(on){
+    markupOn=on;
+    document.body.classList.toggle('markup-on', on);
+    var t=$('penToggle'); t.classList.toggle('on', on); t.textContent = on?'✎ Marking':'✎ Markup';
+    if(on) sizeOverlay();
   }
-  function startDraw(e){ e.preventDefault(); drawing=true; var p=posFromEvent(e); lastX=p.x; lastY=p.y; dot0(p); }
-  function dot0(p){ sctx.beginPath(); sctx.arc(p.x,p.y, tool==='erase'?14:3, 0, 7); sctx.fillStyle= tool==='erase'?'#fff':penColor; sctx.fill(); dirtyStrokes=true; }
+  $('penToggle').onclick=function(){ setMarkup(!markupOn); };
+  var openApp=$('openApp');
+  if(openApp) openApp.onclick=function(){ document.body.classList.add('show-app'); setMarkup(true); };
+
+  // ---- drawing on the overlay ----
+  function ptr(e){
+    var r=overlay.getBoundingClientRect();
+    var t=e.touches&&e.touches[0]?e.touches[0]:e;
+    return { x:t.clientX-r.left, y:t.clientY-r.top };
+  }
+  function startDraw(e){
+    if(!markupOn) return; e.preventDefault();
+    pushUndo(); drawing=true; var p=ptr(e); lastX=p.x; lastY=p.y;
+    // a dot so a tap leaves a mark
+    octx.globalCompositeOperation = tool==='erase'?'destination-out':'source-over';
+    octx.beginPath(); octx.arc(p.x,p.y,(tool==='erase'?penSize*1.6:penSize)/2,0,7);
+    octx.fillStyle= tool==='erase'?'rgba(0,0,0,1)':penColor; octx.fill();
+  }
   function moveDraw(e){
-    if(!drawing) return; e.preventDefault();
-    var p=posFromEvent(e);
-    sctx.strokeStyle=tool==='erase'?'#fff':penColor;
-    sctx.lineWidth=tool==='erase'?28:5; sctx.lineCap='round'; sctx.lineJoin='round';
-    sctx.beginPath(); sctx.moveTo(lastX,lastY); sctx.lineTo(p.x,p.y); sctx.stroke();
-    lastX=p.x; lastY=p.y; dirtyStrokes=true;
+    if(!drawing) return; e.preventDefault(); var p=ptr(e);
+    if(tool==='erase'){ octx.globalCompositeOperation='destination-out'; octx.lineWidth=penSize*3.2; }
+    else { octx.globalCompositeOperation='source-over'; octx.strokeStyle=penColor; octx.lineWidth=penSize; }
+    octx.beginPath(); octx.moveTo(lastX,lastY); octx.lineTo(p.x,p.y); octx.stroke();
+    lastX=p.x; lastY=p.y;
   }
-  function endDraw(){ if(!drawing) return; drawing=false; scheduleAuto(); }
-  sketch.addEventListener('mousedown',startDraw); sketch.addEventListener('mousemove',moveDraw);
+  function endDraw(){ drawing=false; }
+  overlay.addEventListener('mousedown',startDraw);
+  overlay.addEventListener('mousemove',moveDraw);
   window.addEventListener('mouseup',endDraw);
-  sketch.addEventListener('touchstart',startDraw,{passive:false});
-  sketch.addEventListener('touchmove',moveDraw,{passive:false});
-  sketch.addEventListener('touchend',endDraw);
+  overlay.addEventListener('touchstart',startDraw,{passive:false});
+  overlay.addEventListener('touchmove',moveDraw,{passive:false});
+  overlay.addEventListener('touchend',endDraw);
 
-  var autoTimer=null;
-  function scheduleAuto(){
-    if(!$('autoCanvas').checked) return;
-    if(autoTimer) clearTimeout(autoTimer);
-    autoTimer=setTimeout(function(){ if(dirtyStrokes) conjureCanvas(); },2500);
+  // ---- build from markup ----
+  function collectMarkNotes(){ var notes=[]; var t=$('markNote').value.trim(); if(t) notes.push(t); return notes; }
+  // "Seed" = this project has never produced a real build yet, so the preview is
+  // still the placeholder. Authoritative via server build-state (a DOM marker is
+  // unreliable — the model preserves body attributes when editing in place).
+  function isSeedApp(){ return !projectBuilt[currentProject]; }
+  function inkOnWhite(){
+    var c=document.createElement('canvas'); c.width=overlay.width; c.height=overlay.height;
+    var g=c.getContext('2d'); g.fillStyle='#ffffff'; g.fillRect(0,0,c.width,c.height); g.drawImage(overlay,0,0);
+    return c.toDataURL('image/png');
   }
-  function collectCanvasNotes(){ var notes=[]; var t=$('canvasNote').value.trim(); if(t) notes.push(t); voiceCanvasStore.forEach(function(v){notes.push(v);}); return notes; }
-  function canvasHasInk(){
-    var sc=$('scratch'), g=sc.getContext('2d'); g.drawImage(sketch,0,0,64,64);
-    var d=g.getImageData(0,0,64,64).data;
-    for(var i=0;i<d.length;i+=4){ if(d[i]<230||d[i+1]<230||d[i+2]<230) return true; }
-    return false;
+  function compositeShot(){
+    return new Promise(function(res,rej){
+      var doc; try{ doc=preview.contentDocument; }catch(_){ doc=null; }
+      if(!doc||!doc.body||typeof html2canvas!=='function'){ rej(); return; }
+      var f=document.querySelector('.frame'); var w=f.clientWidth, h=f.clientHeight;
+      html2canvas(doc.body,{ backgroundColor:'#ffffff', width:w, height:h,
+        windowWidth:w, windowHeight:h, scale:DPR, useCORS:true, logging:false })
+        .then(function(shot){
+          var c=document.createElement('canvas'); c.width=overlay.width; c.height=overlay.height;
+          var g=c.getContext('2d');
+          g.drawImage(shot,0,0,c.width,c.height);
+          g.drawImage(overlay,0,0,c.width,c.height);
+          res(c.toDataURL('image/png'));
+        }).catch(rej);
+    });
   }
-  function conjureCanvas(){
-    var notes=collectCanvasNotes(), hasInk=canvasHasInk();
-    if(!hasInk && notes.length===0){ setState('error','Nothing to conjure','draw something or add a note'); setTimeout(function(){setState('watching');},1500); return; }
-    var img=hasInk?sketch.toDataURL('image/png'):null;
-    commit(img,notes); dirtyStrokes=false;
-    voiceCanvasStore.length=0; renderQueue($('voiceQueueCanvas'),voiceCanvasStore);
-    if(autoTimer){ clearTimeout(autoTimer); autoTimer=null; }
+  function buildFromMarkup(){
+    if(sending) return;
+    var notes=collectMarkNotes(), hasInk=inkPresent();
+    if(!hasInk && notes.length===0){
+      setState('error','Nothing to build','turn on Markup and draw on the app, or add a note');
+      setTimeout(function(){ setState('watching'); },1600); return;
+    }
+    var done=function(url,kind){
+      commit(url,notes,kind);
+      clearInk(); $('markNote').value=''; setMarkup(false);
+    };
+    if(!hasInk){ done(null,'sketch'); return; }
+    if(isSeedApp()){ done(inkOnWhite(),'sketch'); return; }   // first build on a blank project
+    setState('conjuring',null,'reading your markup…');
+    compositeShot().then(function(url){ done(url,'markup'); })
+                   .catch(function(){ done(inkOnWhite(),'sketch'); });   // fallback if snapshot fails
   }
-  $('conjureCanvas').onclick=conjureCanvas;
+  $('buildMarkup').onclick=buildFromMarkup;
+  $('buildMarkupFloat').onclick=buildFromMarkup;
 
   // ================= CAMERA MODE =================
   var video=$('video'), diffFill=$('diffFill');
@@ -696,7 +844,7 @@
   $('camShoot').onclick=function(){ if(!stream){ startCamera(); setTimeout(captureFrame,1200); return; } committedSmall=grabSmall(); captureFrame(); };
 
   // ---------------- export / open ----------------
-  $('exportBtn').onclick=function(){ var a=document.createElement('a'); a.href=api('app.html')+'?project='+encodeURIComponent(currentProject); a.download='app.html'; a.click(); };
+  $('exportBtn').onclick=function(){ var a=document.createElement('a'); a.href=api('app.html')+'?project='+encodeURIComponent(currentProject)+'&uid='+encodeURIComponent(UID); a.download='app.html'; a.click(); };
   $('openBtn').onclick=function(){ window.open(bust(),'_blank'); };
 
   // ---------------- onboarding (mobile first visit) ----------------
@@ -707,9 +855,10 @@
   }
   function finishOnboard(useCamera){
     LS.set('conjure_onboarded','1'); $('onboard').classList.remove('on');
-    var mode=useCamera?'camera':'canvas';
+    var mode=useCamera?'camera':'markup';
     document.querySelectorAll('.tab').forEach(function(t){ if(t.getAttribute('data-mode')===mode) t.click(); });
     if(useCamera){ $('autoCam').checked=true; startCamera(); }
+    else { document.body.classList.add('show-app'); setMarkup(true); }
   }
   $('onbYes').onclick=function(){ finishOnboard(true); };
   $('onbNo').onclick=function(){ finishOnboard(false); };

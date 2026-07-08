@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none">
+  <!-- Favicon for wordmark-only brand — the Conjure "C" in a bold minimal style -->
+  <rect x="2" y="3" width="3.5" height="10" rx="1.5" fill="#26231d"/>
+  <rect x="2" y="3" width="12" height="3.5" rx="1.5" fill="#26231d"/>
+  <rect x="2" y="12.5" width="10" height="3.5" rx="1.5" fill="#26231d"/>
+  <!-- Accent dot in the corner -->
+  <rect x="12" y="2" width="2" height="2" rx="0.5" fill="#b2482b"/>
+</svg>
