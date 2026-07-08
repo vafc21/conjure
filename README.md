@@ -34,6 +34,11 @@ project in `history/`.
   goes fullscreen with a slim back-arrow bar. Touch targets ≥ 44px.
 - **Passphrase gate** — a signed httpOnly cookie (30 days) protects every route and
   the WebSocket upgrade.
+- **Quick-start demos** — one-click starter prompts (todo, dashboard, landing page,
+  expense tracker) for live demos; homepage links pass intent via sessionStorage.
+- **Presenter mode** — append `?present=1` to auto-open the build terminal;
+  `?starter=todo` (etc.) kicks off a starter after load. **⌘/Ctrl+Enter** triggers Build.
+- **Home / logout** — `/welcome` always shows the marketing page; `/logout` clears the session.
 
 ## Runtime
 
@@ -46,9 +51,14 @@ AI-slop look) and [docs/web-factors.md](docs/web-factors.md) (real front-end cra
 ## Config (`conjure/.env`, read at startup — no dotenv dep)
 
 ```
-CONJURE_PASSPHRASE=three-word-phrase     # gate; if unset the gate is DISABLED (dev)
-CONJURE_COOKIE_SECRET=<random hex>        # HMAC secret for the auth cookie
+CONJURE_PASSPHRASE=three-word-phrase     # gate; required in production unless CONJURE_ALLOW_OPEN=1
+CONJURE_COOKIE_SECRET=<random hex>        # HMAC secret for the auth cookie (required in prod when gated)
+CONJURE_ALLOW_OPEN=1                      # dev only: allow starting without a passphrase in production
 CONJURE_MAX_CONCURRENT=2                  # global semaphore size (default 2)
+CONJURE_AUTH_RATE_MAX=5                   # max /auth attempts per IP per window (default 5)
+CONJURE_AUTH_RATE_WINDOW_MS=900000        # /auth rate window (default 15 min)
+CONJURE_UPDATE_RATE_MAX=10                # max /update requests per IP per window (default 10)
+CONJURE_UPDATE_RATE_WINDOW_MS=3600000     # /update rate window (default 1 hour)
 ```
 
 ## Run
@@ -68,12 +78,14 @@ reverse-proxy mount.
 - `POST /auth` — `passphrase=…` form; sets the auth cookie on success.
 - `GET /projects` · `POST /projects` `{name}` · `POST /projects/:slug/rename` `{name}`
   · `DELETE /projects/:slug` (→ trash).
+- `GET /projects/:slug/history` · `GET /projects/:slug/history/:file` ·
+  `POST /projects/:slug/restore` `{file}` · `POST /projects/:slug/cancel`.
 - `GET /app?project=slug` — the generated app (no-store, for the preview iframe).
 - `GET /app.html?project=slug` — download the generated app.
 - `GET /frames/:slug/:file` — a submitted sketch frame (for the question crop view).
 - `POST /update` — `{ project, image: <base64 png|null>, notes: string[] }`. Per
-  project only the newest pending request is kept (latest-wins stale-drop).
-- `GET /health` — status JSON.
+  project only the newest pending request is kept (latest-wins stale-drop). Rate-limited.
+- `GET /health` · `GET /health?deep=1` — status JSON; `deep=1` probes the Claude runtime.
 - `WS ?project=slug` — server pushes `reload`, `status`, `term`, and `question` events.
 
 ## Deploy (Jarvis Pi)

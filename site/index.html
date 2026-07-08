@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Conjure — draw your app into being</title>
 <meta name="description" content="Sketch a UI on paper, on a canvas, or right on your live app — and watch Conjure build it into a real, working web app. No code, no prompt-wrangling.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Conjure — draw your app into being">
+<meta property="og:description" content="Draw on your live app or a napkin sketch. Conjure builds a working web app in seconds — powered by Claude.">
+<meta property="og:image" content="https://conjure.vlad-p.com/assets/hero.png">
+<meta property="og:url" content="https://conjure.vlad-p.com/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
 <style>
   :root{
     --paper:#e7e0d2; --panel:#efe9dd; --panel2:#f8f4ec; --sheet:#fdfbf6;
@@ -94,6 +101,9 @@
   .card h3{margin:0 0 .3rem;font-size:1.02rem}
   .card p{margin:0;color:var(--muted);font-size:.92rem}
 
+  #features{padding-bottom:6rem}
+  #start{padding-top:6rem}
+
   /* callout */
   .callout{background:var(--ink);color:var(--paper);border-radius:14px;padding:2.6rem 2rem;text-align:center}
   .callout h2{font-size:clamp(1.5rem,3.6vw,2.1rem);margin:0 0 .6rem;letter-spacing:-.01em}
@@ -101,16 +111,49 @@
   .callout .btn{background:var(--accent);border-color:var(--accent-ink);color:#fdfbf6}
   .callout .btn:hover{background:#c85535}
 
+  /* demo starters */
+  .demos{padding:3.5rem 0}
+  .demo-grid{display:grid;grid-template-columns:1fr;gap:.85rem}
+  @media(min-width:640px){ .demo-grid{grid-template-columns:1fr 1fr} }
+  @media(min-width:960px){ .demo-grid{grid-template-columns:repeat(4,1fr)} }
+  .demo{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:1.1rem 1.2rem;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:.35rem;transition:border-color .15s,box-shadow .15s}
+  .demo:hover{border-color:var(--accent);box-shadow:0 4px 18px -10px rgba(38,35,29,.35)}
+  .demo .tag{font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700}
+  .demo h3{margin:0;font-size:.98rem}
+  .demo p{margin:0;color:var(--muted);font-size:.84rem;line-height:1.45}
+
+  /* stack */
+  .stack{background:var(--panel);border-top:1px solid var(--line2);border-bottom:1px solid var(--line2)}
+  .stack .wrap{padding:1.4rem 1.25rem;display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;justify-content:center;align-items:center}
+  .stack span{font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;color:var(--muted)}
+  .stack b{color:var(--ink);font-weight:600}
+  .live{display:inline-flex;align-items:center;gap:.35rem;color:var(--ok,#3f7d4e);font-weight:600}
+  .live i{width:7px;height:7px;border-radius:50%;background:currentColor;animation:livepulse 2s ease-in-out infinite}
+  @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.35}}
+
   footer{border-top:1px solid var(--line2);padding:2rem 0;margin-top:1rem}
   .foot{display:flex;flex-wrap:wrap;gap:1rem;align-items:center;justify-content:space-between}
   .foot .mono{font-size:.66rem}
+
+  /* presenter cheat sheet */
+  .pitch{background:var(--sheet);border:1px solid var(--line2);border-radius:12px;padding:1.4rem 1.5rem;margin-bottom:2rem}
+  .pitch ol{margin:.8rem 0 0;padding-left:1.2rem;color:#4a4539}
+  .pitch li{margin:.35rem 0}
+  .pitch code{font-family:var(--mono);font-size:.78rem;background:var(--panel2);border:1px solid var(--line);
+    border-radius:4px;padding:.1rem .35rem;color:var(--ink)}
+  .pitch .urls{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}
+  .pitch .urls a{font-family:var(--mono);font-size:.72rem;text-decoration:none;color:var(--accent);
+    border:1px solid var(--line2);border-radius:6px;padding:.35rem .55rem;background:var(--panel2)}
+  .pitch .urls a:hover{border-color:var(--accent)}
+  .brand a{text-decoration:none;color:inherit}
 </style>
 </head>
 <body>
 
 <header>
   <div class="wrap nav">
-    <span class="brand">
+    <a class="brand" href="/welcome">
       <svg width="24" height="24" viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <path d="M30 78 L24 78 A8 8 0 0 1 16 70 L16 26 A8 8 0 0 1 24 18 L72 18 A8 8 0 0 1 80 26 L80 50"
               stroke="#26231d" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -120,9 +163,10 @@
         </g>
       </svg>
       Conjure <span class="sub">sketch → app</span>
-    </span>
+    </a>
     <span class="spacer"></span>
     <a class="link" href="#how">How it works</a>
+    <a class="link" href="#demos">Demos</a>
     <a class="link" href="#features">Features</a>
     <a class="btn primary" href="/enter">Start drawing</a>
   </div>
@@ -157,6 +201,16 @@
     </div>
   </div>
 
+  <div class="stack">
+    <div class="wrap">
+      <span class="live"><i aria-hidden="true"></i> Live demo</span>
+      <span><b>Claude Code</b> edits in place</span>
+      <span><b>Sketch or markup</b> input</span>
+      <span><b>Single-file</b> web apps</span>
+      <span><b>Raspberry Pi</b> + Cloudflare</span>
+    </div>
+  </div>
+
   <section id="how" class="wrap">
     <div class="head">
       <span class="mono">How it works</span>
@@ -167,6 +221,36 @@
       <div class="step"><div class="n">01</div><h3>Draw on your app</h3><p>Turn on Markup and sketch your edits straight onto the running app — circle it, cross it out to delete, fill it in to recolor, or write a note. Colors carry meaning.</p></div>
       <div class="step"><div class="n">02</div><h3>Build it</h3><p>Press Build and Conjure rebuilds from your markup — usually in seconds. Watch it think in the live terminal.</p></div>
       <div class="step"><div class="n">03</div><h3>It's live</h3><p>Your working app updates in the preview. Close the tab and come back — builds keep running on the server.</p></div>
+    </div>
+  </section>
+
+  <section id="demos" class="wrap demos">
+    <div class="head">
+      <span class="mono">Try it now</span>
+      <h2>One click. Working app.</h2>
+      <p>No sketch handy? Pick a starter — Conjure builds it from a prompt while you watch the live terminal.</p>
+    </div>
+    <div class="demo-grid">
+      <a class="demo demo-start" href="/enter" data-starter="todo">
+        <span class="tag">~30 sec</span>
+        <h3>Todo app</h3>
+        <p>Filters, checkboxes, localStorage — a complete task list.</p>
+      </a>
+      <a class="demo demo-start" href="/enter" data-starter="dashboard">
+        <span class="tag">~45 sec</span>
+        <h3>Dashboard</h3>
+        <p>Stat cards, chart, activity table — plausible fake data.</p>
+      </a>
+      <a class="demo demo-start" href="/enter" data-starter="landing">
+        <span class="tag">~30 sec</span>
+        <h3>Landing page</h3>
+        <p>Hero, features, CTA — a product page that looks designed.</p>
+      </a>
+      <a class="demo demo-start" href="/enter" data-starter="expense">
+        <span class="tag">~40 sec</span>
+        <h3>Expense tracker</h3>
+        <p>Add expenses, categories, running totals — all persisted.</p>
+      </a>
     </div>
   </section>
 
@@ -204,6 +288,24 @@
     </div>
   </section>
 
+  <section id="present" class="wrap" style="padding-top:2rem;padding-bottom:1rem">
+    <div class="pitch">
+      <span class="mono">Live demo script</span>
+      <h2 style="margin:.45rem 0 .35rem;font-size:1.35rem">Three minutes to wow the judges</h2>
+      <ol>
+        <li>Open the workshop → pick a <b>Quick start</b> (Todo builds in ~30s) or click a demo card above.</li>
+        <li>Turn on <b>✎ Markup</b>, circle a button on the live app, press <b>Build</b> — watch the terminal stream.</li>
+        <li>Export the finished <code>app.html</code> — one self-contained file, no deploy step.</li>
+      </ol>
+      <div class="urls">
+        <a href="/welcome">/welcome</a>
+        <a href="/enter">/enter</a>
+        <a href="/enter" data-starter="todo" class="demo-start">Todo demo</a>
+        <a href="/logout">Sign out</a>
+      </div>
+    </div>
+  </section>
+
   <section id="start" class="wrap">
     <div class="callout">
       <span class="mono" style="color:#e6c3b4">Start</span>
@@ -223,9 +325,17 @@
       </svg>
       Conjure
     </span>
-    <span class="mono">Sketch → app · made on a Raspberry Pi</span>
+    <span class="mono">Sketch → app · made on a Raspberry Pi · <a href="https://github.com/vafc21/conjure" style="color:inherit">source</a></span>
   </div>
 </footer>
+
+<script>
+document.querySelectorAll('.demo-start').forEach(function(a){
+  a.addEventListener('click', function(){
+    try{ sessionStorage.setItem('conjure_starter', a.getAttribute('data-starter')||''); }catch(_){}
+  });
+});
+</script>
 
 </body>
 </html>

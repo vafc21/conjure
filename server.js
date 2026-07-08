@@ -66,11 +66,30 @@ const COOKIE_SECRET = process.env.CONJURE_COOKIE_SECRET
   || crypto.randomBytes(24).toString('hex'); // ephemeral fallback (dev only)
 const COOKIE_NAME = 'conjure_auth';
 const COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const IS_PROD = process.env.NODE_ENV === 'production';
+const ALLOW_OPEN = process.env.CONJURE_ALLOW_OPEN === '1';
+const AUTH_RATE_MAX = parseInt(process.env.CONJURE_AUTH_RATE_MAX || '5', 10);
+const AUTH_RATE_WINDOW_MS = parseInt(process.env.CONJURE_AUTH_RATE_WINDOW_MS || String(15 * 60 * 1000), 10);
+const UPDATE_RATE_MAX = parseInt(process.env.CONJURE_UPDATE_RATE_MAX || '10', 10);
+const UPDATE_RATE_WINDOW_MS = parseInt(process.env.CONJURE_UPDATE_RATE_WINDOW_MS || String(60 * 60 * 1000), 10);
+const HEALTH_CACHE_MS = parseInt(process.env.CONJURE_HEALTH_CACHE_MS || '60000', 10);
+
 if (!PASSPHRASE) {
+  if (IS_PROD && !ALLOW_OPEN) {
+    console.error('[auth] CONJURE_PASSPHRASE is required in production. Set it in conjure/.env or use CONJURE_ALLOW_OPEN=1 to override.');
+    process.exit(1);
+  }
   console.warn('[auth] CONJURE_PASSPHRASE not set — gate DISABLED (open access). Set it in conjure/.env for production.');
 }
 if (!process.env.CONJURE_COOKIE_SECRET) {
+  if (IS_PROD && PASSPHRASE) {
+    console.error('[auth] CONJURE_COOKIE_SECRET is required in production when the gate is enabled.');
+    process.exit(1);
+  }
   console.warn('[auth] CONJURE_COOKIE_SECRET not set — using an ephemeral secret (sessions drop on restart).');
+}
+if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+  console.warn('[health] CLAUDE_CODE_OAUTH_TOKEN not set — builds will fail until the token is provided.');
 }
 
 for (const d of [WS_DIR, PROJECTS_DIR, TRASH_DIR]) fs.mkdirSync(d, { recursive: true });
@@ -207,7 +226,7 @@ function trashProject(slug, reason) {
     console.error(`[sweep] could not trash ${slug}:`, e && e.message);
     return false;
   }
-  queues.delete(slug); statusByProject.delete(slug);
+  queues.delete(slug); statusByProject.delete(slug); runningBuilds.delete(slug);
   console.log(`[sweep] ${slug} → .trash/${path.basename(dest)} (${reason})`);
   return true;
 }
@@ -275,6 +294,7 @@ p{max-width:320px;line-height:1.5;font-size:.9rem}</style></head>
 // ---------------------------------------------------------------------------
 const statusByProject = new Map(); // slug -> {state, ts, detail}
 const queues = new Map();          // slug -> {pending, running}
+const runningBuilds = new Map();   // slug -> { cancel(err?) }
 let active = 0;
 
 function setStatus(slug, state, detail) {
@@ -305,8 +325,15 @@ function schedule() {
       active++;
       runUpdate(slug, job)
         .catch((err) => {
-          console.error(`[update ${slug}] failed:`, err && err.message ? err.message : err);
-          setStatus(slug, 'error', String(err && err.message ? err.message : err).slice(0, 200));
+          const msg = String(err && err.message ? err.message : err);
+          if (/cancelled/i.test(msg)) {
+            console.log(`[update ${slug}] cancelled`);
+            setStatus(slug, 'idle', 'cancelled');
+            broadcastProject(slug, { type: 'term', kind: 'note', label: 'cancel', snippet: 'build cancelled' });
+            return;
+          }
+          console.error(`[update ${slug}] failed:`, msg);
+          setStatus(slug, 'error', msg.slice(0, 200));
         })
         .finally(() => { st.running = false; active--; schedule(); });
     }
@@ -377,6 +404,57 @@ async function runUpdate(slug, job) {
   broadcastProject(slug, { type: 'term', kind: 'done', label: 'done', snippet: `wrote ${html.length} bytes` });
   setStatus(slug, 'updated', 'app updated');
   broadcastProject(slug, { type: 'reload' });
+}
+
+function cancelBuild(slug) {
+  const st = projState(slug);
+  let cancelled = false;
+  if (st.pending) {
+    st.pending = null;
+    cancelled = true;
+    broadcastProject(slug, { type: 'term', kind: 'note', label: 'queue', snippet: 'queued build cancelled' });
+  }
+  const run = runningBuilds.get(slug);
+  if (run) {
+    run.cancel(new Error('cancelled by user'));
+    cancelled = true;
+  }
+  if (!cancelled && !st.running) setStatus(slug, 'idle', 'ready');
+  return cancelled;
+}
+
+function safeHistoryFile(file) {
+  return typeof file === 'string' && /^[\w.-]+\.html$/.test(file) && !file.includes('..');
+}
+
+function listHistory(slug) {
+  let files = [];
+  try { files = fs.readdirSync(historyDir(slug)).filter((f) => f.endsWith('.html')); } catch (_) {}
+  return files
+    .map((file) => {
+      let mtime = 0, size = 0;
+      try {
+        const st = fs.statSync(path.join(historyDir(slug), file));
+        mtime = st.mtimeMs;
+        size = st.size;
+      } catch (_) {}
+      return { file, mtime, size };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+function restoreHistory(slug, file) {
+  const src = path.join(historyDir(slug), file);
+  if (!fs.existsSync(src)) throw new Error('snapshot not found');
+  const html = fs.readFileSync(src, 'utf8');
+  if (!/<(?:!doctype|html)/i.test(html)) throw new Error('not an HTML document');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  if (fs.existsSync(appFile(slug))) {
+    fs.copyFileSync(appFile(slug), path.join(historyDir(slug), `${ts}-pre-restore.html`));
+  }
+  fs.writeFileSync(appFile(slug), html);
+  markBuilt(slug);
+  return html.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -545,9 +623,13 @@ function runClaudeStream(slug, prompt, term) {
     function finish(err2) {
       if (done) return; done = true;
       clearInterval(watchdog);
+      runningBuilds.delete(slug);
       try { child.kill('SIGKILL'); } catch (_) {}
       reject(err2);
     }
+    runningBuilds.set(slug, {
+      cancel: (err) => finish(err || new Error('cancelled by user')),
+    });
     const watchdog = setInterval(async () => {
       if (done) return;
       const now = Date.now();
@@ -615,11 +697,12 @@ function runClaudeStream(slug, prompt, term) {
       }
     });
     child.stderr.on('data', (d) => { err += d.toString(); lastActivity = Date.now(); });
-    child.on('error', (e) => { if (done) return; done = true; clearInterval(watchdog); reject(e); });
+    child.on('error', (e) => { if (done) return; done = true; clearInterval(watchdog); runningBuilds.delete(slug); reject(e); });
     child.on('close', (code) => {
       if (done) return;
       done = true;
       clearInterval(watchdog);
+      runningBuilds.delete(slug);
       if (buf.trim()) handleLine(buf); // flush any trailing partial line
       const out = resultText || assembledText;
       if (code !== 0 && !out.trim()) {
@@ -708,6 +791,59 @@ function isAuthed(req) {
   return verifyToken(cookies[COOKIE_NAME]);
 }
 
+// ---------------------------------------------------------------------------
+// Rate limiting (in-memory, per IP — no extra deps)
+// ---------------------------------------------------------------------------
+function clientIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  if (xf) return String(Array.isArray(xf) ? xf[0] : xf).split(',')[0].trim();
+  return req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : 'unknown';
+}
+
+function createRateLimiter(windowMs, max, keyFn, onLimit) {
+  const buckets = new Map();
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = keyFn(req);
+    let b = buckets.get(key);
+    if (!b || now >= b.resetAt) {
+      b = { count: 0, resetAt: now + windowMs };
+      buckets.set(key, b);
+    }
+    b.count++;
+    res.setHeader('X-RateLimit-Limit', String(max));
+    res.setHeader('X-RateLimit-Remaining', String(Math.max(0, max - b.count)));
+    res.setHeader('X-RateLimit-Reset', String(Math.ceil(b.resetAt / 1000)));
+    if (b.count > max) {
+      const retrySec = Math.max(1, Math.ceil((b.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retrySec));
+      if (typeof onLimit === 'function') return onLimit(req, res, retrySec);
+      return res.status(429).json({ ok: false, error: 'rate limit exceeded', retryAfter: retrySec });
+    }
+    next();
+  };
+}
+
+const rateLimitAuth = createRateLimiter(AUTH_RATE_WINDOW_MS, AUTH_RATE_MAX, clientIp, (req, res, retrySec) => {
+  res.status(429).type('html').send(gatePage(basePath(req), false, retrySec));
+});
+const rateLimitUpdate = createRateLimiter(UPDATE_RATE_WINDOW_MS, UPDATE_RATE_MAX, clientIp);
+
+// ---------------------------------------------------------------------------
+// Runtime health (cached Claude probe for /health?deep=1)
+// ---------------------------------------------------------------------------
+let healthCache = { at: 0, token: false, claude: false, ok: false };
+
+async function probeRuntimeHealth(force) {
+  const now = Date.now();
+  if (!force && healthCache.at && (now - healthCache.at) < HEALTH_CACHE_MS) return healthCache;
+  const token = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  let claude = false;
+  if (token) claude = await claudeHealthy(15000);
+  healthCache = { at: now, token, claude, ok: token && claude };
+  return healthCache;
+}
+
 // The anonymous owner id: an "X-Conjure-Uid" header (fetch/XHR) or a "uid" query
 // param (iframe src, download links, image loads, WS upgrade). Constrained to a
 // safe charset so it can never influence a filesystem path.
@@ -721,7 +857,10 @@ function callerUid(req) {
   return /^[A-Za-z0-9_-]{8,64}$/.test(uid) ? uid : '';
 }
 
-function gatePage(base, error) {
+function gatePage(base, error, rateLimitSec) {
+  const errMsg = rateLimitSec
+    ? `Too many attempts — try again in ${rateLimitSec}s.`
+    : (error ? 'Incorrect passphrase — try again.' : '');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -767,7 +906,7 @@ function gatePage(base, error) {
     <label for="p">Passphrase</label>
     <input id="p" name="passphrase" type="password" autocomplete="current-password" autofocus placeholder="three-word phrase">
     <button type="submit">Unlock</button>
-    <div class="err">${error ? 'Incorrect passphrase — try again.' : ''}</div>
+    <div class="err">${errMsg}</div>
   </form>
 </body></html>`;
 }
@@ -795,24 +934,40 @@ app.use((req, res, next) => {
   next();
 });
 
+function authCookieFlags(req) {
+  const proto = req && req.headers && req.headers['x-forwarded-proto'];
+  return (proto === 'https' || (req && req.secure)) ? '; Secure' : '';
+}
+
+function clearAuthCookie(res, req) {
+  res.setHeader('Set-Cookie',
+    `${COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${authCookieFlags(req)}`);
+}
+
 // Auth endpoint (must be reachable while unauthenticated).
-app.post('/auth', (req, res) => {
+app.post('/auth', rateLimitAuth, (req, res) => {
   const base = basePath(req);
   const given = (req.body && req.body.passphrase) || '';
   if (PASSPHRASE && given === PASSPHRASE) {
     const tok = signToken(Date.now());
     res.setHeader('Set-Cookie',
-      `${COOKIE_NAME}=${tok}; HttpOnly; Path=/; Max-Age=${Math.floor(COOKIE_MAX_AGE_MS / 1000)}; SameSite=Lax`);
+      `${COOKIE_NAME}=${tok}; HttpOnly; Path=/; Max-Age=${Math.floor(COOKIE_MAX_AGE_MS / 1000)}; SameSite=Lax${authCookieFlags(req)}`);
     return res.redirect(base);
   }
   res.status(401).type('html').send(gatePage(base, true));
+});
+
+// Sign out and return to the public homepage (ungated).
+app.get('/logout', (req, res) => {
+  clearAuthCookie(res, req);
+  res.redirect('/welcome');
 });
 
 // Public marketing homepage (ungated). Its "Start drawing" links to /enter.
 function sendHome(res) {
   const f = path.join(ROOT, 'site', 'index.html');
   if (!fs.existsSync(f)) return res.status(404).type('text').send('no homepage');
-  res.type('html'); res.set('Cache-Control', 'public, max-age=300');
+  res.type('html'); res.set('Cache-Control', 'public, max-age=60');
   fs.createReadStream(f).pipe(res);
 }
 app.get(['/welcome', '/home'], (req, res) => sendHome(res));
@@ -845,8 +1000,24 @@ app.use((req, res, next) => {
 });
 
 // ---- authed routes ----
-app.get(['/health', '/api/health'], (req, res) => {
-  res.json({ ok: true, model: MODEL, active, maxConcurrent: MAX_CONCURRENT, projects: countProjects() });
+app.get(['/health', '/api/health'], async (req, res) => {
+  const deep = req.query.deep === '1' || req.query.check === 'claude';
+  const token = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  let runtime = { token, claude: null };
+  if (deep) {
+    const h = await probeRuntimeHealth(req.query.force === '1');
+    runtime = { token: h.token, claude: h.claude };
+  }
+  const ok = token && (!deep || runtime.claude === true);
+  res.status(ok ? 200 : 503).json({
+    ok,
+    model: MODEL,
+    active,
+    maxConcurrent: MAX_CONCURRENT,
+    projects: countProjects(),
+    gate: !!PASSPHRASE,
+    runtime,
+  });
 });
 
 app.get('/projects', (req, res) => res.json({ ok: true, projects: listProjects(callerUid(req)) }));
@@ -876,11 +1047,12 @@ app.post('/projects/:slug/rename', (req, res) => {
 app.delete('/projects/:slug', (req, res) => {
   const slug = req.params.slug;
   if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
+  cancelBuild(slug);
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   try {
     fs.renameSync(projectDir(slug), path.join(TRASH_DIR, `${ts}-${slug}`)); // never rm
   } catch (e) { return res.status(500).json({ ok: false, error: 'delete failed' }); }
-  queues.delete(slug); statusByProject.delete(slug);
+  queues.delete(slug); statusByProject.delete(slug); runningBuilds.delete(slug);
   // No global fallback project: the client recreates a Scratchpad if this was
   // the caller's last project.
   res.json({ ok: true });
@@ -889,7 +1061,54 @@ app.delete('/projects/:slug', (req, res) => {
 app.get('/status', (req, res) => {
   const slug = req.query.project;
   if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ state: 'idle', detail: 'no such project' });
-  res.json(getStatus(slug));
+  const st = getStatus(slug);
+  const q = projState(slug);
+  res.json(Object.assign({}, st, { running: !!q.running, queued: !!q.pending }));
+});
+
+app.get('/projects/:slug/history', (req, res) => {
+  const slug = req.params.slug;
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
+  res.json({ ok: true, history: listHistory(slug) });
+});
+
+app.get('/projects/:slug/history/:file', (req, res) => {
+  const { slug, file } = req.params;
+  if (!ownsProject(slug, callerUid(req)) || !safeHistoryFile(file)) {
+    return res.status(404).json({ ok: false, error: 'not found' });
+  }
+  const p = path.join(historyDir(slug), file);
+  if (!p.startsWith(historyDir(slug)) || !fs.existsSync(p)) {
+    return res.status(404).json({ ok: false, error: 'not found' });
+  }
+  res.set('Content-Disposition', `attachment; filename="${file}"`);
+  res.type('html');
+  fs.createReadStream(p).pipe(res);
+});
+
+app.post('/projects/:slug/restore', (req, res) => {
+  const slug = req.params.slug;
+  const file = ((req.body && req.body.file) || '').trim();
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
+  if (!safeHistoryFile(file)) return res.status(400).json({ ok: false, error: 'invalid snapshot' });
+  const q = projState(slug);
+  if (q.running || q.pending) return res.status(409).json({ ok: false, error: 'wait for the current build to finish' });
+  try {
+    const bytes = restoreHistory(slug, file);
+    console.log(`[restore ${slug}] restored ${file} (${bytes} bytes)`);
+    setStatus(slug, 'updated', `restored ${file}`);
+    broadcastProject(slug, { type: 'reload' });
+    res.json({ ok: true, file, bytes });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e && e.message ? e.message : e) });
+  }
+});
+
+app.post('/projects/:slug/cancel', (req, res) => {
+  const slug = req.params.slug;
+  if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
+  const cancelled = cancelBuild(slug);
+  res.json({ ok: true, cancelled });
 });
 
 // The generated app, per project, served cache-busted for the preview iframe.
@@ -945,7 +1164,7 @@ app.post('/import', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/update', (req, res) => {
+app.post('/update', rateLimitUpdate, (req, res) => {
   const body = req.body || {};
   const slug = body.project;
   if (!ownsProject(slug, callerUid(req))) return res.status(404).json({ ok: false, error: 'no such project' });
@@ -1027,4 +1246,7 @@ server.listen(PORT, HOST, () => {
   console.log(`Conjure v2 listening on http://${HOST}:${PORT}  (model: ${MODEL}, gate: ${PASSPHRASE ? 'on' : 'OFF'})`);
   sweepProjects(); // relocate orphaned/stale projects on start …
   setInterval(sweepProjects, 24 * 60 * 60 * 1000); // … and once a day
+  probeRuntimeHealth(true).then((h) => {
+    console.log(`[health] token=${h.token ? 'yes' : 'NO'} claude=${h.claude ? 'ok' : 'FAILED'}`);
+  }).catch((e) => console.warn('[health] startup probe error:', e && e.message));
 });
