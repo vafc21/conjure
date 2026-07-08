@@ -49,6 +49,11 @@
   .cta-note{font-size:.82rem;color:var(--muted)}
   @media(min-width:860px){ .hero{grid-template-columns:1.05fr .95fr} }
 
+  /* hero product shot */
+  .shot{margin:0}
+  .shot img{width:100%;height:auto;display:block;border:1px solid var(--line2);border-radius:12px;
+    box-shadow:0 1px 0 rgba(0,0,0,.02),0 22px 48px -26px rgba(38,35,29,.5)}
+  .shot figcaption{margin-top:.6rem;font-family:var(--mono);font-size:.64rem;letter-spacing:.04em;color:var(--muted);text-align:center}
   /* hero sketch panel */
   .panel{background:var(--sheet);border:1px solid var(--line2);border-radius:12px;
     box-shadow:0 1px 0 rgba(0,0,0,.02),0 18px 40px -24px rgba(38,35,29,.45);overflow:hidden}
@@ -119,7 +124,7 @@
     <span class="spacer"></span>
     <a class="link" href="#how">How it works</a>
     <a class="link" href="#features">Features</a>
-    <a class="btn primary" href="/">Start drawing</a>
+    <a class="btn primary" href="/enter">Start drawing</a>
   </div>
 </header>
 
@@ -130,41 +135,17 @@
       <h1>Draw your app <span class="u">into being.</span></h1>
       <p class="lede">Sketch a UI on paper, on a canvas, or <strong>right on top of your live app</strong> — and Conjure builds it into a real, working web app in seconds. You change it by marking it up, not by wrestling with prompts.</p>
       <div class="cta-row">
-        <a class="btn primary" href="/">Start drawing</a>
+        <a class="btn primary" href="/enter">Start drawing</a>
         <a class="btn" href="#how">See how it works</a>
         <span class="cta-note">Point a camera at a napkin. Watch it come alive.</span>
       </div>
     </div>
 
-    <div class="panel" aria-hidden="true">
-      <div class="bar"><i></i><i></i><i></i><span class="t">your sketch → live app</span></div>
-      <div class="canvas">
-        <span class="tag" style="left:8%;top:9%">draw</span>
-        <span class="tag" style="right:8%;bottom:9%;background:#b2482b">build ▸</span>
-        <svg viewBox="0 0 320 220" preserveAspectRatio="xMidYMid meet">
-          <!-- hand-drawn UI sketch -->
-          <g stroke="#26231d" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="40" y="34" width="240" height="150" rx="8"/>
-            <line x1="40" y1="62" x2="280" y2="62"/>
-            <circle cx="58" cy="48" r="6"/>
-            <line x1="150" y1="48" x2="270" y2="48" opacity=".5"/>
-            <rect x="60" y="82" width="120" height="46" rx="6"/>
-            <line x1="60" y1="140" x2="250" y2="140" opacity=".55"/>
-            <line x1="60" y1="154" x2="210" y2="154" opacity=".4"/>
-          </g>
-          <!-- filled-in (colored) button = accent -->
-          <g>
-            <rect x="196" y="86" width="66" height="34" rx="8" fill="#b2482b"/>
-            <text x="229" y="108" font-family="ui-monospace,Menlo,monospace" font-size="12" fill="#fdfbf6" text-anchor="middle">Go</text>
-          </g>
-          <!-- red annotation arrow -->
-          <g stroke="#c0392b" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M300 150 C280 150 274 128 262 118"/>
-            <path d="M262 118 l10 2 M262 118 l1 10"/>
-          </g>
-        </svg>
-      </div>
-    </div>
+    <figure class="shot">
+      <img src="/assets/hero.png" width="1360" height="840"
+           alt="Conjure with a green circle drawn on the &lsquo;Start your garden&rsquo; button of a live app in the preview">
+      <figcaption>Circling a button on the live app — press Build and it changes.</figcaption>
+    </figure>
   </section>
 
   <div class="strip">
@@ -228,7 +209,7 @@
       <span class="mono" style="color:#e6c3b4">Start</span>
       <h2>If you can draw it, you can build it.</h2>
       <p>Grab a pen — real or on screen — and turn the picture in your head into a working app.</p>
-      <a class="btn" href="/">Start drawing</a>
+      <a class="btn" href="/enter">Start drawing</a>
     </div>
   </section>
 </main>

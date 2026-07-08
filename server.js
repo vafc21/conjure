@@ -808,13 +808,31 @@ app.post('/auth', (req, res) => {
   res.status(401).type('html').send(gatePage(base, true));
 });
 
-// Public marketing homepage (ungated). "Start drawing" on it links to the gated
-// app at "/". Served from site/index.html.
-app.get(['/welcome', '/home'], (req, res) => {
+// Public marketing homepage (ungated). Its "Start drawing" links to /enter.
+function sendHome(res) {
   const f = path.join(ROOT, 'site', 'index.html');
   if (!fs.existsSync(f)) return res.status(404).type('text').send('no homepage');
   res.type('html'); res.set('Cache-Control', 'public, max-age=300');
   fs.createReadStream(f).pipe(res);
+}
+app.get(['/welcome', '/home'], (req, res) => sendHome(res));
+
+// Public static assets for the homepage (e.g. /assets/hero.png), ungated.
+app.use('/assets', express.static(path.join(ROOT, 'site'), { maxAge: '1h' }));
+
+// Bare domain: signed-in users get the app UI; visitors get the public homepage.
+app.get('/', (req, res) => {
+  if (isAuthed(req)) {
+    const app0 = path.join(ROOT, 'public', 'index.html');
+    if (fs.existsSync(app0)) { res.type('html'); return fs.createReadStream(app0).pipe(res); }
+  }
+  return sendHome(res);
+});
+
+// Passphrase entry (ungated) — where the homepage's "Start drawing" sends you.
+app.get('/enter', (req, res) => {
+  if (isAuthed(req)) return res.redirect(basePath(req));
+  res.type('html').send(gatePage(basePath(req), false));
 });
 
 // Gate middleware: everything below requires a valid cookie.
