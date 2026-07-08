@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="Conjure">
+  <rect x="0" y="0" width="100" height="100" rx="20" fill="#26231d"/>
+  <g transform="translate(-1,-1) scale(1.0625)">
+    <path d="M32 78 L24 78 A8 8 0 0 1 16 70 L16 26 A8 8 0 0 1 24 18 L72 18 A8 8 0 0 1 80 26 L80 52"
+          fill="none" stroke="#efe9dd" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M24 18 L72 18 A8 8 0 0 1 80 26 L80 31 L16 31 L16 26 A8 8 0 0 1 24 18 Z" fill="#c0512f"/>
+  </g>
+</svg>
