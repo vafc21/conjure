@@ -97,19 +97,15 @@
     touch-action:none;pointer-events:none;cursor:crosshair}
   body.markup-on #inkOverlay{pointer-events:auto}
   body.markup-on #preview{pointer-events:none}
-  .marktools{position:absolute;left:.6rem;top:.6rem;z-index:8;display:flex;flex-wrap:wrap;
-    align-items:center;gap:.35rem;padding:.4rem;background:rgba(239,233,221,.97);
-    border:1px solid var(--line2);border-radius:9px;box-shadow:0 4px 16px rgba(0,0,0,.16);
-    max-width:calc(100% - 1.2rem)}
+  /* docked toolbar strip ABOVE the preview — never covers the app you're building */
+  .marktools{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;flex:none;
+    padding:.4rem .7rem;background:var(--panel);border-bottom:1px solid var(--line2)}
   .marktools .grp{display:none;align-items:center;gap:.35rem;flex-wrap:wrap}
   body.markup-on .marktools .grp{display:flex}
-  .marktools .sep{width:1px;align-self:stretch;background:var(--line2);margin:0 .1rem}
+  .marktools .sep{width:1px;align-self:stretch;min-height:22px;background:var(--line2);margin:0 .1rem}
   .marktools input.note{width:150px;max-width:38vw;background:var(--sheet);border:1px solid var(--line2);
     border-radius:5px;padding:.4rem .5rem;font:inherit;font-size:16px;color:var(--ink)}
   .marktools input.note:focus{outline:none;border-color:var(--accent)}
-  .markhint{position:absolute;right:.6rem;bottom:.6rem;z-index:8;background:var(--ink);color:var(--paper);
-    font-family:var(--mono);font-size:.66rem;letter-spacing:.04em;padding:.32rem .55rem;border-radius:5px;display:none}
-  body.markup-on .markhint{display:block}
   .mob-only{display:none}
   /* camera */
   video{width:100%;border-radius:5px;background:#111;display:block}
@@ -294,40 +290,41 @@
         <button class="btn ghost" id="openBtn">Open</button>
       </div>
 
+      <!-- markup toolbar: docked strip above the preview, not over the app -->
+      <div class="marktools" id="markTools">
+        <button class="btn tool" id="penToggle" title="Toggle drawing on the app">✎ Markup</button>
+        <span class="grp">
+          <span class="sep"></span>
+          <span class="markers" role="group" aria-label="Marker color">
+            <button class="swatch on" data-color="#1b1b1b" style="background:#1b1b1b" title="Black"></button>
+            <button class="swatch" data-color="#c0392b" style="background:#c0392b" title="Red"></button>
+            <button class="swatch" data-color="#d35400" style="background:#d35400" title="Orange"></button>
+            <button class="swatch" data-color="#c8951b" style="background:#c8951b" title="Amber"></button>
+            <button class="swatch" data-color="#2f7d3f" style="background:#2f7d3f" title="Green"></button>
+            <button class="swatch" data-color="#147d76" style="background:#147d76" title="Teal"></button>
+            <button class="swatch" data-color="#2b5fb2" style="background:#2b5fb2" title="Blue"></button>
+            <button class="swatch" data-color="#c0397e" style="background:#c0397e" title="Pink"></button>
+          </span>
+          <span class="sep"></span>
+          <span class="sizes" role="group" aria-label="Brush size">
+            <button class="sizedot" data-size="3" title="Thin"><i style="width:4px;height:4px"></i></button>
+            <button class="sizedot on" data-size="6" title="Medium"><i style="width:8px;height:8px"></i></button>
+            <button class="sizedot" data-size="11" title="Thick"><i style="width:13px;height:13px"></i></button>
+          </span>
+          <span class="sep"></span>
+          <button class="btn tool" id="toolErase">Erase</button>
+          <button class="btn tool ghost" id="toolUndo">Undo</button>
+          <button class="btn tool ghost" id="toolClear">Clear</button>
+          <span class="sep"></span>
+          <input class="note" id="markNote" type="text" placeholder="note (optional)" aria-label="Note for this build">
+          <button class="btn tool" id="voiceMarkup">Voice</button>
+          <button class="btn primary" id="buildMarkupFloat" style="min-height:38px;padding:.45rem .8rem">Build ▸</button>
+        </span>
+      </div>
+
       <div class="frame">
         <iframe id="preview" title="Generated app"></iframe>
         <canvas id="inkOverlay"></canvas>
-        <div class="marktools" id="markTools">
-          <button class="btn tool" id="penToggle" title="Toggle drawing on the app">✎ Markup</button>
-          <span class="grp">
-            <span class="sep"></span>
-            <span class="markers" role="group" aria-label="Marker color">
-              <button class="swatch on" data-color="#1b1b1b" style="background:#1b1b1b" title="Black"></button>
-              <button class="swatch" data-color="#c0392b" style="background:#c0392b" title="Red"></button>
-              <button class="swatch" data-color="#d35400" style="background:#d35400" title="Orange"></button>
-              <button class="swatch" data-color="#c8951b" style="background:#c8951b" title="Amber"></button>
-              <button class="swatch" data-color="#2f7d3f" style="background:#2f7d3f" title="Green"></button>
-              <button class="swatch" data-color="#147d76" style="background:#147d76" title="Teal"></button>
-              <button class="swatch" data-color="#2b5fb2" style="background:#2b5fb2" title="Blue"></button>
-              <button class="swatch" data-color="#c0397e" style="background:#c0397e" title="Pink"></button>
-            </span>
-            <span class="sep"></span>
-            <span class="sizes" role="group" aria-label="Brush size">
-              <button class="sizedot" data-size="3" title="Thin"><i style="width:4px;height:4px"></i></button>
-              <button class="sizedot on" data-size="6" title="Medium"><i style="width:8px;height:8px"></i></button>
-              <button class="sizedot" data-size="11" title="Thick"><i style="width:13px;height:13px"></i></button>
-            </span>
-            <span class="sep"></span>
-            <button class="btn tool" id="toolErase">Erase</button>
-            <button class="btn tool ghost" id="toolUndo">Undo</button>
-            <button class="btn tool ghost" id="toolClear">Clear</button>
-            <span class="sep"></span>
-            <input class="note" id="markNote" type="text" placeholder="note (optional)" aria-label="Note for this build">
-            <button class="btn tool" id="voiceMarkup">Voice</button>
-            <button class="btn primary" id="buildMarkupFloat" style="min-height:38px;padding:.45rem .8rem">Build ▸</button>
-          </span>
-        </div>
-        <div class="markhint">markup on — drawing over your app</div>
         <div class="shimmer" id="shimmer"><span class="badge">Working…</span></div>
       </div>
 
