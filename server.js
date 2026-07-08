@@ -59,6 +59,12 @@ const IDLE_MS = parseInt(process.env.CONJURE_IDLE_MS || process.env.CONJURE_TIME
 const HARD_MAX_MS = parseInt(process.env.CONJURE_MAX_BUILD_MS || '1800000', 10); // 30 min
 const WATCH_TICK_MS = parseInt(process.env.CONJURE_WATCH_TICK_MS || '15000', 10);
 const PROBE_MODEL = process.env.CONJURE_PROBE_MODEL || 'haiku';
+// Art director: a fast Fable pass writes a concrete design brief that the Sonnet
+// builder must follow, so generated sites look intentionally designed. Runs on
+// new-site builds by default ('new'); 'all' = every build, 'off' = disabled.
+const ART_MODEL = process.env.CONJURE_ART_MODEL || 'fable';
+const ART_DIRECTOR = (process.env.CONJURE_ART_DIRECTOR || 'new').toLowerCase();
+const ART_TIMEOUT_MS = parseInt(process.env.CONJURE_ART_TIMEOUT_MS || '75000', 10);
 const MAX_CONCURRENT = parseInt(process.env.CONJURE_MAX_CONCURRENT || '2', 10);
 
 const PASSPHRASE = process.env.CONJURE_PASSPHRASE || '';
@@ -326,7 +332,22 @@ async function runUpdate(slug, job) {
   }
 
   const current = fs.existsSync(appFile(slug)) ? fs.readFileSync(appFile(slug), 'utf8') : '';
-  const prompt = buildPrompt(current, job.notes || [], frameName, job.kind, job.view);
+
+  // Art-director pass (Fable) — establish a strong, app-specific look. Runs on
+  // new sites by default; never blocks the build if it fails.
+  let built = false;
+  try { built = !!JSON.parse(fs.readFileSync(metaFile(slug), 'utf8')).built; } catch (_) {}
+  let brief = null;
+  if (ART_DIRECTOR === 'all' || (ART_DIRECTOR === 'new' && !built)) {
+    setStatus(slug, 'conjuring', 'art director shaping the look…');
+    broadcastProject(slug, { type: 'term', kind: 'note', label: 'design', snippet: `art director (${ART_MODEL}) setting the visual direction…` });
+    const term0 = Date.now();
+    brief = await designBrief(slug, job.notes || [], frameName);
+    if (brief) broadcastProject(slug, { type: 'term', kind: 'note', label: 'design', snippet: `design brief ready (${((Date.now() - term0) / 1000).toFixed(0)}s) — handing to the builder` });
+    else broadcastProject(slug, { type: 'term', kind: 'note', label: 'design', snippet: 'art director skipped — building on standing style rules' });
+  }
+
+  const prompt = buildPrompt(current, job.notes || [], frameName, job.kind, job.view, brief);
 
   setStatus(slug, 'conjuring', framePath ? (job.kind === 'markup' ? 'reading your markup…' : 'interpreting sketch…') : 'applying notes…');
   console.log(`[update ${slug}] ${ts} image=${!!framePath} notes=${(job.notes || []).length}`);
@@ -382,7 +403,7 @@ async function runUpdate(slug, job) {
 // ---------------------------------------------------------------------------
 // Prompt
 // ---------------------------------------------------------------------------
-function buildPrompt(current, notes, frameName, kind, view) {
+function buildPrompt(current, notes, frameName, kind, view, brief) {
   const noteBlock = notes && notes.length
     ? notes.map((n, i) => `  ${i + 1}. ${n}`).join('\n')
     : '  (none)';
@@ -405,7 +426,12 @@ function buildPrompt(current, notes, frameName, kind, view) {
   return `You maintain a single-file web app (app.html) whose specification is a sketch (a photo of paper OR a digital drawing) plus optional typed/spoken notes.
 
 ${imgLine}
-${viewLine}
+${viewLine}${brief ? `
+DESIGN DIRECTION — a design director prepared this brief specifically for this app. Treat it as AUTHORITATIVE for the visual system (palette, typography, layout, spacing, signature touches). Follow it precisely. The user's own drawn/written intent still wins wherever they conflict.
+<<<DESIGN_BRIEF
+${brief}
+DESIGN_BRIEF
+` : ''}
 Notes from the user (typed and/or voice-transcribed):
 ${noteBlock}
 
@@ -510,6 +536,44 @@ function claudeHealthy(timeoutMs = 30000) {
     child.on('error', () => { if (done) return; done = true; clearTimeout(to); resolve(false); });
     child.on('close', (code) => { if (done) return; done = true; clearTimeout(to); resolve(code === 0 && out.trim().length > 0); });
     try { child.stdin.write('Reply with the single word OK.'); child.stdin.end(); } catch (_) {}
+  });
+}
+
+// Art-director pass: ask Fable (fast) to write a concrete, app-specific design
+// brief that the Sonnet builder must follow. Returns the brief text, or null on
+// any failure/timeout (the build then proceeds on the standing style rules).
+function designBrief(slug, notes, frameName) {
+  return new Promise((resolve) => {
+    const noteText = (notes && notes.length) ? notes.join('; ') : '(no written notes — infer intent from the sketch image if present)';
+    const frameLine = frameName
+      ? `A sketch/screenshot image is on disk at frames/${frameName} in your working directory. Use your Read tool to view it and understand the intended layout and content.`
+      : `There is no image this time — design from the description alone.`;
+    const prompt = `You are a senior product & brand designer with sharp front-end taste. A builder AI is about to generate a single-file web app. Write a SHORT, concrete DESIGN BRIEF it must follow so the result looks intentionally designed by a skilled human — not generic "AI slop".
+
+What the user is making: ${noteText}
+${frameLine}
+
+Write the brief as tight bullet points, max ~160 words, covering:
+- Direction: one line naming the mood/style that fits THIS app.
+- Palette: 3-5 hex colors with roles (background, surface, text, ONE accent, muted). The accent must NOT be purple/violet/indigo.
+- Type: a concrete font stack (a system stack or one common family) and how to build hierarchy with size/weight.
+- Layout & rhythm: overall structure, spacing scale (e.g. 4/8px steps), border-radius, hairline borders vs shadows.
+- 2-3 signature touches that make it feel crafted and specific to THIS app.
+
+Hard rules: no purple/indigo, no gradients, no glassmorphism, no neon glows, no emoji as chrome, no gradient-filled text. If the user's sketch or notes specify colors or a style, HONOR them — refine, don't override.
+
+Output ONLY the brief. No preamble, no sign-off, no code, no markdown headings.`;
+    let out = '', done = false, child;
+    try {
+      child = spawn('claude', ['-p', '--model', ART_MODEL, '--permission-mode', 'bypassPermissions',
+        '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch', 'Task'],
+        { cwd: projectDir(slug), env: process.env, stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch (_) { resolve(null); return; }
+    const to = setTimeout(() => { if (done) return; done = true; try { child.kill('SIGKILL'); } catch (_) {} resolve(out.trim() || null); }, ART_TIMEOUT_MS);
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.on('error', () => { if (done) return; done = true; clearTimeout(to); resolve(null); });
+    child.on('close', () => { if (done) return; done = true; clearTimeout(to); resolve(out.trim() || null); });
+    try { child.stdin.write(prompt); child.stdin.end(); } catch (_) {}
   });
 }
 
