@@ -1,41 +1,150 @@
 'use strict';
 
 /*
- * Conjure server
- * --------------
+ * Conjure server (v2)
+ * -------------------
  * Sketch-to-live-app. Accepts sketch frames (webcam or digital canvas) plus
  * optional notes, invokes the Claude Code CLI (claude-sonnet-5) to maintain a
- * single-file web app at workspace/app.html, and hot-reloads any connected
- * iframe over a WebSocket.
+ * single-file web app, and hot-reloads any connected iframe over a WebSocket.
+ *
+ * v2 adds: named multi-project workspaces, a global 2-slot semaphore with
+ * per-project latest-wins queues, a live terminal stream of the Claude run
+ * (stream-json → compact WS events), clarifying questions, drawing colors, an
+ * iPhone-friendly onboarding/fullscreen flow, and a passphrase gate covering
+ * every route and the WebSocket upgrade.
  *
  * Deps: express + ws only. No native/compiled modules.
  */
 
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = process.env.PORT || 8091;
-const HOST = '0.0.0.0';
 const ROOT = __dirname;
 const WS_DIR = path.join(ROOT, 'workspace');
-const FRAMES_DIR = path.join(WS_DIR, 'frames');
-const HISTORY_DIR = path.join(WS_DIR, 'history');
-const APP_FILE = path.join(WS_DIR, 'app.html');
+const PROJECTS_DIR = path.join(WS_DIR, 'projects');
+const TRASH_DIR = path.join(WS_DIR, '.trash');
+
+// ---------------------------------------------------------------------------
+// Env: systemd already loads jarvis/.env; also load a local conjure/.env
+// (passphrase + cookie secret live there) without adding a dotenv dependency.
+// ---------------------------------------------------------------------------
+function loadEnvFile(p) {
+  try {
+    const txt = fs.readFileSync(p, 'utf8');
+    for (const line of txt.split('\n')) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (!m) continue;
+      let v = m[2];
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+      if (process.env[m[1]] === undefined) process.env[m[1]] = v;
+    }
+  } catch (_) { /* file may not exist locally */ }
+}
+loadEnvFile(path.join(ROOT, '.env'));
+
+const PORT = process.env.PORT || 8091;
+const HOST = '0.0.0.0';
 const MODEL = process.env.CONJURE_MODEL || 'claude-sonnet-5';
 const CLAUDE_TIMEOUT_MS = parseInt(process.env.CONJURE_TIMEOUT_MS || '240000', 10);
+const MAX_CONCURRENT = parseInt(process.env.CONJURE_MAX_CONCURRENT || '2', 10);
 
-for (const d of [WS_DIR, FRAMES_DIR, HISTORY_DIR]) {
-  fs.mkdirSync(d, { recursive: true });
+const PASSPHRASE = process.env.CONJURE_PASSPHRASE || '';
+const COOKIE_SECRET = process.env.CONJURE_COOKIE_SECRET
+  || crypto.randomBytes(24).toString('hex'); // ephemeral fallback (dev only)
+const COOKIE_NAME = 'conjure_auth';
+const COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+if (!PASSPHRASE) {
+  console.warn('[auth] CONJURE_PASSPHRASE not set — gate DISABLED (open access). Set it in conjure/.env for production.');
+}
+if (!process.env.CONJURE_COOKIE_SECRET) {
+  console.warn('[auth] CONJURE_COOKIE_SECRET not set — using an ephemeral secret (sessions drop on restart).');
 }
 
-// Seed a placeholder app if none exists yet.
-if (!fs.existsSync(APP_FILE)) {
-  fs.writeFileSync(APP_FILE, seedApp());
+for (const d of [WS_DIR, PROJECTS_DIR, TRASH_DIR]) fs.mkdirSync(d, { recursive: true });
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+function slugify(name) {
+  return String(name || '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'project';
 }
+function projectDir(slug) { return path.join(PROJECTS_DIR, slug); }
+function appFile(slug) { return path.join(projectDir(slug), 'app.html'); }
+function framesDir(slug) { return path.join(projectDir(slug), 'frames'); }
+function historyDir(slug) { return path.join(projectDir(slug), 'history'); }
+function metaFile(slug) { return path.join(projectDir(slug), 'meta.json'); }
+
+function projectExists(slug) {
+  return /^[a-z0-9-]+$/.test(slug) && fs.existsSync(metaFile(slug));
+}
+
+function ensureProject(slug, name) {
+  fs.mkdirSync(projectDir(slug), { recursive: true });
+  fs.mkdirSync(framesDir(slug), { recursive: true });
+  fs.mkdirSync(historyDir(slug), { recursive: true });
+  if (!fs.existsSync(metaFile(slug))) {
+    fs.writeFileSync(metaFile(slug), JSON.stringify({
+      slug, name: name || slug, created: new Date().toISOString(),
+    }, null, 2));
+  }
+  if (!fs.existsSync(appFile(slug))) fs.writeFileSync(appFile(slug), seedApp());
+  return slug;
+}
+
+function createProject(name) {
+  const base = slugify(name);
+  let slug = base, i = 2;
+  while (fs.existsSync(projectDir(slug))) slug = `${base}-${i++}`;
+  ensureProject(slug, name && name.trim() ? name.trim() : slug);
+  return readProject(slug);
+}
+
+function readProject(slug) {
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(metaFile(slug), 'utf8')); } catch (_) {}
+  let updated = 0;
+  try { updated = fs.statSync(appFile(slug)).mtimeMs; } catch (_) {}
+  return { slug, name: meta.name || slug, created: meta.created || null, updated };
+}
+
+function listProjects() {
+  let dirs = [];
+  try { dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true }); } catch (_) {}
+  return dirs
+    .filter((d) => d.isDirectory() && projectExists(d.name))
+    .map((d) => readProject(d.name))
+    .sort((a, b) => b.updated - a.updated);
+}
+
+// One-time migration: legacy single-workspace files → projects/scratchpad.
+function migrateLegacy() {
+  const legacyApp = path.join(WS_DIR, 'app.html');
+  const scratch = projectDir('scratchpad');
+  if (fs.existsSync(scratch)) return; // already migrated / created
+  ensureProject('scratchpad', 'Scratchpad');
+  try {
+    if (fs.existsSync(legacyApp)) {
+      fs.copyFileSync(legacyApp, appFile('scratchpad'));
+      fs.rmSync(legacyApp, { force: true });
+    }
+    for (const [srcName, destDir] of [['history', historyDir('scratchpad')], ['frames', framesDir('scratchpad')]]) {
+      const src = path.join(WS_DIR, srcName);
+      if (!fs.existsSync(src)) continue;
+      for (const f of fs.readdirSync(src)) {
+        if (f.startsWith('.')) continue;
+        try { fs.renameSync(path.join(src, f), path.join(destDir, f)); } catch (_) {}
+      }
+    }
+  } catch (e) { console.error('[migrate] ', e && e.message); }
+}
+migrateLegacy();
+ensureProject('scratchpad', 'Scratchpad'); // guarantee a default always exists
 
 function seedApp() {
   return `<!doctype html>
@@ -65,78 +174,114 @@ function seedApp() {
 }
 
 // ---------------------------------------------------------------------------
-// Update queue: single in-flight job, keep only the newest pending request.
+// Per-project status + concurrency (global 2-slot semaphore, latest-wins queue)
 // ---------------------------------------------------------------------------
-let inFlight = false;
-let pending = null; // { image: Buffer|null, notes: string[] }
-let lastStatus = { state: 'idle', ts: Date.now(), detail: 'ready' };
+const statusByProject = new Map(); // slug -> {state, ts, detail}
+const queues = new Map();          // slug -> {pending, running}
+let active = 0;
 
-function setStatus(state, detail) {
-  lastStatus = { state, ts: Date.now(), detail: detail || '' };
-  broadcast({ type: 'status', state, detail: detail || '' });
+function setStatus(slug, state, detail) {
+  const s = { state, ts: Date.now(), detail: detail || '' };
+  statusByProject.set(slug, s);
+  broadcastProject(slug, { type: 'status', state, detail: s.detail });
 }
-
-function enqueue(job) {
-  pending = job; // depth-1 queue: newest wins
-  if (!inFlight) drain();
+function getStatus(slug) {
+  return statusByProject.get(slug) || { state: 'idle', ts: Date.now(), detail: 'ready' };
 }
-
-async function drain() {
-  if (inFlight) return;
-  const job = pending;
-  pending = null;
-  if (!job) return;
-  inFlight = true;
-  try {
-    await runUpdate(job);
-  } catch (err) {
-    console.error('[update] failed:', err && err.message ? err.message : err);
-    setStatus('error', String(err && err.message ? err.message : err).slice(0, 200));
-  } finally {
-    inFlight = false;
-    if (pending) drain(); // a newer request landed while we worked
+function projState(slug) {
+  if (!queues.has(slug)) queues.set(slug, { pending: null, running: false });
+  return queues.get(slug);
+}
+function enqueue(slug, job) {
+  const st = projState(slug);
+  if (st.pending) broadcastProject(slug, { type: 'term', kind: 'note', label: 'queue', snippet: 'newer request superseded a queued one' });
+  st.pending = job; // latest wins (stale-drop, per project)
+  schedule();
+}
+function schedule() {
+  for (const [slug, st] of queues) {
+    if (active >= MAX_CONCURRENT) break;
+    if (st.pending && !st.running) {
+      const job = st.pending;
+      st.pending = null;
+      st.running = true;
+      active++;
+      runUpdate(slug, job)
+        .catch((err) => {
+          console.error(`[update ${slug}] failed:`, err && err.message ? err.message : err);
+          setStatus(slug, 'error', String(err && err.message ? err.message : err).slice(0, 200));
+        })
+        .finally(() => { st.running = false; active--; schedule(); });
+    }
   }
 }
 
-async function runUpdate(job) {
+// ---------------------------------------------------------------------------
+// A single update run
+// ---------------------------------------------------------------------------
+async function runUpdate(slug, job) {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  let framePath = null;
+  let frameName = null, framePath = null;
   if (job.image && job.image.length) {
-    framePath = path.join(FRAMES_DIR, `${ts}.png`);
+    frameName = `${ts}.png`;
+    framePath = path.join(framesDir(slug), frameName);
     fs.writeFileSync(framePath, job.image);
   }
 
-  const current = fs.existsSync(APP_FILE) ? fs.readFileSync(APP_FILE, 'utf8') : '';
-  const prompt = buildPrompt(current, job.notes || [], framePath);
+  const current = fs.existsSync(appFile(slug)) ? fs.readFileSync(appFile(slug), 'utf8') : '';
+  const prompt = buildPrompt(current, job.notes || [], frameName);
 
-  setStatus('conjuring', framePath ? 'interpreting sketch…' : 'applying notes…');
-  console.log(`[update] ${ts} image=${!!framePath} notes=${(job.notes || []).length}`);
+  setStatus(slug, 'conjuring', framePath ? 'interpreting sketch…' : 'applying notes…');
+  console.log(`[update ${slug}] ${ts} image=${!!framePath} notes=${(job.notes || []).length}`);
 
-  const raw = await callClaude(prompt);
-  const html = extractHtml(raw);
+  const term = makeTermEmitter(slug);
+  const raw = await runClaudeStream(slug, prompt, term);
+  term.end();
 
-  if (!html) {
-    try { fs.writeFileSync(path.join(WS_DIR, 'last_error_raw.txt'), raw || '(empty)'); } catch (_) {}
-    console.error('[update] no valid HTML produced (raw ' + (raw ? raw.length : 0) +
-      ' bytes); keeping previous version. head: ' + JSON.stringify((raw || '').slice(0, 160)));
-    setStatus('error', 'model did not return valid HTML; kept previous version');
+  // Clarifying question path: the model may ask instead of guessing.
+  const q = detectQuestion(raw);
+  if (q) {
+    console.log(`[update ${slug}] model asked a clarifying question`);
+    broadcastProject(slug, {
+      type: 'question',
+      project: slug,
+      question: q.question,
+      bbox: q.bbox || null,
+      frameFile: frameName,
+      frameUrl: frameName ? `frames/${slug}/${frameName}` : null,
+    });
+    setStatus(slug, 'question', 'waiting on your answer');
+    broadcastProject(slug, { type: 'term', kind: 'done', label: 'question', snippet: q.question });
     return;
   }
 
-  fs.writeFileSync(APP_FILE, html);
-  fs.writeFileSync(path.join(HISTORY_DIR, `${ts}.html`), html);
-  console.log(`[update] ${ts} wrote app.html (${html.length} bytes)`);
-  setStatus('updated', 'app updated');
-  broadcast({ type: 'reload' });
+  const html = extractHtml(raw);
+  if (!html) {
+    try { fs.writeFileSync(path.join(projectDir(slug), 'last_error_raw.txt'), raw || '(empty)'); } catch (_) {}
+    console.error(`[update ${slug}] no valid HTML (raw ${raw ? raw.length : 0}b); keeping previous. head: ` +
+      JSON.stringify((raw || '').slice(0, 160)));
+    setStatus(slug, 'error', 'model did not return valid HTML; kept previous version');
+    return;
+  }
+
+  fs.writeFileSync(appFile(slug), html);
+  fs.writeFileSync(path.join(historyDir(slug), `${ts}.html`), html);
+  console.log(`[update ${slug}] ${ts} wrote app.html (${html.length} bytes)`);
+  broadcastProject(slug, { type: 'term', kind: 'done', label: 'done', snippet: `wrote ${html.length} bytes` });
+  setStatus(slug, 'updated', 'app updated');
+  broadcastProject(slug, { type: 'reload' });
 }
 
-function buildPrompt(current, notes, framePath) {
+// ---------------------------------------------------------------------------
+// Prompt
+// ---------------------------------------------------------------------------
+function buildPrompt(current, notes, frameName) {
   const noteBlock = notes && notes.length
     ? notes.map((n, i) => `  ${i + 1}. ${n}`).join('\n')
     : '  (none)';
 
-  const imgLine = framePath
-    ? `A new sketch image is on disk at:\n  ${path.relative(WS_DIR, framePath)}\nUse your Read tool to view that image file. It is the newest sketch/photo describing the desired UI.`
+  const imgLine = frameName
+    ? `A new sketch image is on disk at:\n  frames/${frameName}\nUse your Read tool to view that image file. It is the newest sketch/photo describing the desired UI.`
     : `There is no new sketch image this time — apply ONLY the notes below.`;
 
   return `You maintain a single-file web app (app.html) whose specification is a sketch (a photo of paper OR a digital drawing) plus optional typed/spoken notes.
@@ -153,11 +298,17 @@ CURRENT_APP_HTML
 
 RULES:
 - Interpret sketches generously: boxes are containers, scribbled words are text/labels, arrows imply flow/order, and an X or scribble struck THROUGH an element means DELETE that element.
+- COLOR IN THE SKETCH CARRIES MEANING: the drawing may use several marker colors. Ink in a DIFFERENT color from the main drawing is usually an annotation/instruction (e.g. a red arrow + "make this bigger"), and colored elements often indicate the desired color of that element. Read color intent, don't ignore it.
 - Change ONLY what changed in the sketch or was requested in the notes. Preserve all other existing features, structure, and styling.
 - Everything must actually work: buttons click and do something, charts render with plausible fake data, inputs validate, nav switches views.
 - Single self-contained file. Inline CSS and JS only. No external network calls, no CDN links, no external fonts.
 - Persist meaningful app state in localStorage so a reload does not lose user data.
-- If the sketch is ambiguous, choose the most reasonable interpretation.
+
+CLARIFYING QUESTION — only when you GENUINELY cannot proceed:
+- If the sketch/notes are so ambiguous that any build would be a blind guess (e.g. a nearly-empty sketch with a note like "make it like the other one" referencing something you cannot see), DO NOT guess.
+- Instead output EXACTLY this and NOTHING else (no HTML, no prose): QUESTION:{"question":"<your one specific question>","bbox":{"x":0,"y":0,"w":0,"h":0}}
+- bbox is the percent region (0-100) of the sketch you are asking about; include it only if a specific region is unclear, otherwise use {"x":0,"y":0,"w":100,"h":100}.
+- Use this sparingly — prefer the most reasonable interpretation whenever one plausibly exists.
 
 VISUAL STYLE — the user's drawn/written intent ALWAYS wins; when they specify colors, mood, or a style, follow it. Otherwise, when style is unspecified, design like a thoughtful human and DO NOT produce the generic "AI-generated" look. Concretely:
 - DO NOT default to purple/violet/indigo accents (no #7c5cff / indigo-500 family) and DO NOT use purple→blue or purple→teal gradients anywhere (backgrounds, buttons, or text fills).
@@ -165,30 +316,83 @@ VISUAL STYLE — the user's drawn/written intent ALWAYS wins; when they specify 
 - No emoji used as headings, buttons, bullets, or decoration. No "magic/sparkle/conjure" filler copy. No pill "badge" floating above a centered hero, no row of three identical icon-topped cards unless the sketch actually shows that.
 - Choose a restrained palette that fits what was sketched: mostly honest neutrals (white / off-white / paper / greys, or a clean true dark with AA-contrast text) plus AT MOST ONE confident accent color that is NOT purple. Use color to signal function, not to decorate.
 - Typography: a plain system font stack (system-ui, -apple-system, "Segoe UI", Roboto, sans-serif) or ONE deliberate common family; build hierarchy with size/weight/spacing. Modest border-radius (4-8px). Prefer hairline borders over heavy shadows.
-- Aim for a clean, purposeful, slightly utilitarian feel appropriate to the app's function — not a marketing landing page.
 
-- Output ONLY the complete updated HTML file, starting with <!doctype html>. No explanations, no markdown fences.`;
+WEB QUALITY — build it like a competent front-end engineer would:
+- Visual hierarchy: one clear primary action per view; group related things; align everything to a shared grid — no ragged edges or ad-hoc padding.
+- Spacing on a consistent scale (4/8px steps). Whitespace is structural, not wasted.
+- Contrast: body text ≥ 4.5:1 on its background; interactive controls and focus rings ≥ 3:1. Never signal state by color alone. Give inputs real <label>s and a visible :focus-visible outline.
+- Responsive & mobile: never require horizontal scroll; single-column reflow on small screens; touch targets ≥ 44px; inputs ≥ 16px font (avoids iOS zoom) with correct type/inputmode.
+- Typography scale: base 16px+, line-height ~1.5 for body; hierarchy via size/weight, not many families; body line length 45–75 characters.
+- Perceived performance & states: instant feedback on interactions; handle empty, loading, and error states; avoid layout shift. Use real, plausible content, not lorem ipsum.
+- Forms: label above field, inline validation on blur with a specific fix, preserve entered data on error, obvious primary submit.
+
+- Output ONLY the complete updated HTML file, starting with <!doctype html>. No explanations, no markdown fences. (Unless you are asking a QUESTION as described above.)`;
 }
 
-function callClaude(prompt) {
+// ---------------------------------------------------------------------------
+// Claude runtime — stream-json → compact terminal events over WS
+// ---------------------------------------------------------------------------
+function makeTermEmitter(slug) {
+  const buf = { thinking: '', text: '' };
+  let timer = null;
+  function flush() {
+    for (const kind of ['thinking', 'text']) {
+      if (buf[kind]) {
+        broadcastProject(slug, { type: 'term', kind, label: kind, snippet: buf[kind] });
+        buf[kind] = '';
+      }
+    }
+    timer = null;
+  }
+  return {
+    delta(kind, txt) {
+      buf[kind] += txt;
+      if (buf[kind].length > 160) flush();
+      else if (!timer) timer = setTimeout(flush, 140);
+    },
+    event(kind, label, snippet) {
+      flush();
+      broadcastProject(slug, { type: 'term', kind, label, snippet: (snippet || '').slice(0, 240) });
+    },
+    end() { if (timer) { clearTimeout(timer); timer = null; } flush(); },
+  };
+}
+
+function compactInput(input) {
+  if (!input) return '';
+  if (input.file_path) return input.file_path;
+  try { return JSON.stringify(input).slice(0, 180); } catch (_) { return ''; }
+}
+function toolResultSnippet(content) {
+  try {
+    if (typeof content === 'string') return content.slice(0, 180);
+    if (Array.isArray(content)) {
+      const txt = content.map((c) => (c && c.type === 'text' ? c.text : (c && c.text) || '')).join(' ').trim();
+      return (txt || JSON.stringify(content)).slice(0, 180);
+    }
+    return JSON.stringify(content).slice(0, 180);
+  } catch (_) { return ''; }
+}
+
+function runClaudeStream(slug, prompt, term) {
   return new Promise((resolve, reject) => {
     // Disallow every file-mutating / exec / network / agent tool so the model
-    // has no choice but to PRINT the finished file to stdout. (Left enabled:
-    // Read — needed so it can view the sketch image on disk.) Without this the
-    // agent tends to Write app.html itself and print only a prose summary,
-    // which both breaks stdout parsing and clobbers the live file.
+    // has no choice but to PRINT the finished file to stdout. (Read stays
+    // enabled so it can view the sketch image on disk.)
     const args = [
-      '-p', '--model', MODEL, '--permission-mode', 'bypassPermissions',
+      '-p', '--model', MODEL,
+      '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+      '--permission-mode', 'bypassPermissions',
       '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
       'Bash', 'WebFetch', 'WebSearch', 'Task',
     ];
     const child = spawn('claude', args, {
-      cwd: WS_DIR,
-      env: process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: projectDir(slug), env: process.env, stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    let out = '';
+    let buf = '';
+    let resultText = '';
+    let assembledText = '';
     let err = '';
     let done = false;
 
@@ -199,18 +403,51 @@ function callClaude(prompt) {
       reject(new Error(`claude timed out after ${CLAUDE_TIMEOUT_MS}ms`));
     }, CLAUDE_TIMEOUT_MS);
 
-    child.stdout.on('data', (d) => { out += d.toString(); });
-    child.stderr.on('data', (d) => { err += d.toString(); });
-    child.on('error', (e) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      reject(e);
+    function route(ev) {
+      if (!ev || !ev.type) return;
+      if (ev.type === 'stream_event' && ev.event) {
+        const e = ev.event;
+        if (e.type === 'content_block_delta' && e.delta) {
+          if (e.delta.type === 'text_delta' && e.delta.text) term.delta('text', e.delta.text);
+          else if (e.delta.type === 'thinking_delta' && e.delta.thinking) term.delta('thinking', e.delta.thinking);
+        }
+      } else if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
+        for (const b of ev.message.content) {
+          if (b.type === 'tool_use') term.event('tool_use', b.name || 'tool', compactInput(b.input));
+          else if (b.type === 'text' && b.text) assembledText += b.text;
+        }
+      } else if (ev.type === 'user' && ev.message && Array.isArray(ev.message.content)) {
+        for (const b of ev.message.content) {
+          if (b.type === 'tool_result') term.event('tool_result', 'result', toolResultSnippet(b.content));
+        }
+      } else if (ev.type === 'result') {
+        if (typeof ev.result === 'string') resultText = ev.result;
+      }
+    }
+    function handleLine(line) {
+      line = line.trim();
+      if (!line) return;
+      let ev; try { ev = JSON.parse(line); } catch (_) { return; }
+      try { route(ev); } catch (_) {}
+    }
+
+    child.stdout.on('data', (d) => {
+      buf += d.toString();
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 1);
+        handleLine(line);
+      }
     });
+    child.stderr.on('data', (d) => { err += d.toString(); });
+    child.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); reject(e); });
     child.on('close', (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (buf.trim()) handleLine(buf); // flush any trailing partial line
+      const out = resultText || assembledText;
       if (code !== 0 && !out.trim()) {
         return reject(new Error(`claude exited ${code}: ${err.slice(0, 300)}`));
       }
@@ -222,28 +459,124 @@ function callClaude(prompt) {
   });
 }
 
+// Detect a clarifying-question response: QUESTION:{...json...}
+function detectQuestion(raw) {
+  if (!raw) return null;
+  const m = raw.match(/QUESTION:\s*(\{[\s\S]*\})/);
+  if (!m) return null;
+  // Trim to the first balanced JSON object after QUESTION:
+  let s = m[1];
+  let depth = 0, endIdx = -1;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '{') depth++;
+    else if (s[i] === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+  }
+  if (endIdx !== -1) s = s.slice(0, endIdx + 1);
+  try {
+    const obj = JSON.parse(s);
+    if (obj && typeof obj.question === 'string' && obj.question.trim()) {
+      return { question: obj.question.trim(), bbox: obj.bbox && typeof obj.bbox === 'object' ? obj.bbox : null };
+    }
+  } catch (_) {}
+  return null;
+}
+
 // Pull a full HTML document out of the model's stdout. Robust against code
 // fences and leading/trailing chatter. Returns null if nothing usable.
 function extractHtml(raw) {
   if (!raw) return null;
   let s = raw.trim();
-
-  // Strip a single wrapping code fence if the whole thing is fenced.
   const fence = s.match(/```(?:html)?\s*([\s\S]*?)```/i);
-  if (fence && fence[1] && /<(?:!doctype|html)/i.test(fence[1])) {
-    s = fence[1].trim();
-  }
-
+  if (fence && fence[1] && /<(?:!doctype|html)/i.test(fence[1])) s = fence[1].trim();
   const m = s.match(/<!doctype html>|<!DOCTYPE html>|<html[\s>]/i);
   if (!m) return null;
   let html = s.slice(m.index).trim();
-
-  // Trim anything after the final </html> if present.
   const end = html.toLowerCase().lastIndexOf('</html>');
   if (end !== -1) html = html.slice(0, end + '</html>'.length);
-
   if (html.length < 40) return null;
   return html;
+}
+
+// ---------------------------------------------------------------------------
+// Auth (passphrase gate) — signed httpOnly cookie, covers HTTP + WS upgrade
+// ---------------------------------------------------------------------------
+function signToken(issuedMs) {
+  const payload = String(issuedMs);
+  const sig = crypto.createHmac('sha256', COOKIE_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+function verifyToken(tok) {
+  if (!tok || typeof tok !== 'string') return false;
+  const i = tok.lastIndexOf('.');
+  if (i < 0) return false;
+  const payload = tok.slice(0, i);
+  const sig = tok.slice(i + 1);
+  const expect = crypto.createHmac('sha256', COOKIE_SECRET).update(payload).digest('base64url');
+  const a = Buffer.from(sig), b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  const issued = parseInt(payload, 10);
+  if (!issued || Date.now() - issued > COOKIE_MAX_AGE_MS) return false;
+  return true;
+}
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+function isAuthed(req) {
+  if (!PASSPHRASE) return true; // gate disabled when no passphrase configured
+  const cookies = parseCookies(req.headers.cookie);
+  return verifyToken(cookies[COOKIE_NAME]);
+}
+
+function gatePage(base, error) {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conjure — locked</title>
+<style>
+  :root{--paper:#e7e0d2;--panel2:#f8f4ec;--sheet:#fdfbf6;--line:#d3c8b4;--line2:#c3b79e;
+    --ink:#26231d;--muted:#7c7566;--accent:#b2482b;--accent-ink:#8f3820;--danger:#a3372a;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    display:flex;align-items:center;justify-content:center}
+  form{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:1.6rem;
+    width:min(92vw,360px);box-shadow:0 1px 0 #fff inset}
+  .logo{display:flex;color:var(--accent);margin-bottom:.7rem}
+  h1{font-size:1.05rem;margin:0 0 .2rem}
+  p{color:var(--muted);font-size:.82rem;line-height:1.5;margin:0 0 1rem}
+  label{display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 .35rem}
+  input{width:100%;background:var(--sheet);border:1px solid var(--line2);border-radius:6px;
+    padding:.7rem;font:inherit;font-size:16px;color:var(--ink)}
+  input:focus{outline:none;border-color:var(--accent)}
+  button{margin-top:.9rem;width:100%;min-height:44px;background:var(--accent);color:#fdfbf6;
+    border:1px solid var(--accent-ink);border-radius:6px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{background:var(--accent-ink)}
+  .err{color:var(--danger);font-size:.78rem;margin-top:.6rem;font-family:var(--mono);min-height:1em}
+</style></head>
+<body>
+  <form method="POST" action="${base}auth">
+    <span class="logo" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12.5 2.5l3 3-8.5 8.5-3.7 .7 .7-3.7 8.5-8.5z"/><path d="M10.7 4.3l3 3"/>
+      </svg>
+    </span>
+    <h1>Conjure</h1>
+    <p>This workshop is passphrase-protected. Enter the phrase to continue.</p>
+    <label for="p">Passphrase</label>
+    <input id="p" name="passphrase" type="password" autocomplete="current-password" autofocus placeholder="three-word phrase">
+    <button type="submit">Unlock</button>
+    <div class="err">${error ? 'Incorrect passphrase — try again.' : ''}</div>
+  </form>
+</body></html>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,37 +584,119 @@ function extractHtml(raw) {
 // ---------------------------------------------------------------------------
 const app = express();
 app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: false }));
 
-// Base-path tolerance: whether tailscale serve strips the /conjure prefix or
-// not, normalize it away so all routes work at "/" and "/conjure/".
+// Compute the base path for links/redirects (tolerate a /conjure prefix mount).
+function basePath(req) {
+  const p = req.originalUrl.split('?')[0];
+  if (p.startsWith('/conjure')) return '/conjure/';
+  return '/';
+}
+
+// Base-path tolerance: normalize a /conjure prefix away so routes work at both
+// "/" and "/conjure/".
 app.use((req, res, next) => {
-  if (req.url === '/conjure') { req.url = '/'; }
-  else if (req.url.startsWith('/conjure/')) { req.url = req.url.slice('/conjure'.length); }
+  if (req.url === '/conjure') req.url = '/';
+  else if (req.url.startsWith('/conjure/')) req.url = req.url.slice('/conjure'.length);
+  else if (req.url.startsWith('/conjure?')) req.url = '/?' + req.url.slice('/conjure?'.length);
   next();
 });
 
-app.get(['/health', '/api/health'], (req, res) => {
-  res.json({ ok: true, status: lastStatus, inFlight, model: MODEL });
+// Auth endpoint (must be reachable while unauthenticated).
+app.post('/auth', (req, res) => {
+  const base = basePath(req);
+  const given = (req.body && req.body.passphrase) || '';
+  if (PASSPHRASE && given === PASSPHRASE) {
+    const tok = signToken(Date.now());
+    res.setHeader('Set-Cookie',
+      `${COOKIE_NAME}=${tok}; HttpOnly; Path=/; Max-Age=${Math.floor(COOKIE_MAX_AGE_MS / 1000)}; SameSite=Lax`);
+    return res.redirect(base);
+  }
+  res.status(401).type('html').send(gatePage(base, true));
 });
 
-app.get('/status', (req, res) => res.json(lastStatus));
+// Gate middleware: everything below requires a valid cookie.
+app.use((req, res, next) => {
+  if (isAuthed(req)) return next();
+  const base = basePath(req);
+  const wantsHtml = req.method === 'GET' && (req.headers.accept || '').indexOf('text/html') >= 0;
+  if (wantsHtml) return res.status(401).type('html').send(gatePage(base, false));
+  return res.status(401).json({ ok: false, error: 'unauthorized' });
+});
 
-// The generated app, served cache-busted for the preview iframe.
+// ---- authed routes ----
+app.get(['/health', '/api/health'], (req, res) => {
+  res.json({ ok: true, model: MODEL, active, maxConcurrent: MAX_CONCURRENT, projects: listProjects().length });
+});
+
+app.get('/projects', (req, res) => res.json({ ok: true, projects: listProjects() }));
+
+app.post('/projects', (req, res) => {
+  const name = (req.body && req.body.name) || '';
+  if (!name.trim()) return res.status(400).json({ ok: false, error: 'name required' });
+  const p = createProject(name);
+  res.json({ ok: true, project: p });
+});
+
+app.post('/projects/:slug/rename', (req, res) => {
+  const slug = req.params.slug;
+  const name = ((req.body && req.body.name) || '').trim();
+  if (!projectExists(slug)) return res.status(404).json({ ok: false, error: 'no such project' });
+  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaFile(slug), 'utf8'));
+    meta.name = name;
+    fs.writeFileSync(metaFile(slug), JSON.stringify(meta, null, 2));
+  } catch (e) { return res.status(500).json({ ok: false, error: 'rename failed' }); }
+  res.json({ ok: true, project: readProject(slug) });
+});
+
+app.delete('/projects/:slug', (req, res) => {
+  const slug = req.params.slug;
+  if (!projectExists(slug)) return res.status(404).json({ ok: false, error: 'no such project' });
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    fs.renameSync(projectDir(slug), path.join(TRASH_DIR, `${slug}-${ts}`)); // never rm
+  } catch (e) { return res.status(500).json({ ok: false, error: 'delete failed' }); }
+  queues.delete(slug); statusByProject.delete(slug);
+  if (listProjects().length === 0) ensureProject('scratchpad', 'Scratchpad');
+  res.json({ ok: true });
+});
+
+app.get('/status', (req, res) => {
+  const slug = req.query.project || 'scratchpad';
+  res.json(getStatus(slug));
+});
+
+// The generated app, per project, served cache-busted for the preview iframe.
 app.get('/app', (req, res) => {
+  const slug = projectExists(req.query.project) ? req.query.project : 'scratchpad';
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.type('html');
-  fs.createReadStream(APP_FILE).pipe(res);
+  fs.createReadStream(appFile(slug)).pipe(res);
 });
 
 // Raw download for the Export button.
 app.get('/app.html', (req, res) => {
+  const slug = projectExists(req.query.project) ? req.query.project : 'scratchpad';
   res.set('Content-Disposition', 'attachment; filename="app.html"');
   res.type('html');
-  fs.createReadStream(APP_FILE).pipe(res);
+  fs.createReadStream(appFile(slug)).pipe(res);
+});
+
+// Serve a submitted sketch frame (for the clarifying-question crop view).
+app.get('/frames/:slug/:file', (req, res) => {
+  const { slug, file } = req.params;
+  if (!projectExists(slug) || !/^[\w.-]+\.png$/.test(file)) return res.status(404).end();
+  const p = path.join(framesDir(slug), file);
+  if (!p.startsWith(framesDir(slug)) || !fs.existsSync(p)) return res.status(404).end();
+  res.type('png');
+  fs.createReadStream(p).pipe(res);
 });
 
 app.post('/update', (req, res) => {
   const body = req.body || {};
+  const slug = projectExists(body.project) ? body.project : 'scratchpad';
   let imageBuf = null;
   if (body.image && typeof body.image === 'string') {
     const b64 = body.image.replace(/^data:image\/\w+;base64,/, '');
@@ -290,39 +705,58 @@ app.post('/update', (req, res) => {
   const notes = Array.isArray(body.notes)
     ? body.notes.filter((n) => typeof n === 'string' && n.trim()).map((n) => n.trim())
     : [];
-
   if ((!imageBuf || !imageBuf.length) && notes.length === 0) {
     return res.status(400).json({ ok: false, error: 'need an image or at least one note' });
   }
-
-  enqueue({ image: imageBuf, notes });
-  res.json({ ok: true, queued: true, inFlight });
+  enqueue(slug, { image: imageBuf, notes });
+  res.json({ ok: true, queued: true, project: slug });
 });
 
 app.use(express.static(path.join(ROOT, 'public')));
 
 const server = http.createServer(app);
 
-// Accept WS upgrades on ANY path (handles /ws and /conjure/ws transparently).
+// WebSocket: scoped per project, gated by the same auth cookie.
 const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (req, socket, head) => {
+  if (!isAuthed(req)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  let project = 'scratchpad';
+  try {
+    const u = new URL(req.url, 'http://localhost');
+    const q = u.searchParams.get('project');
+    if (q && projectExists(q)) project = q;
+  } catch (_) {}
   wss.handleUpgrade(req, socket, head, (ws) => {
+    ws.project = project;
     wss.emit('connection', ws, req);
   });
 });
 wss.on('connection', (ws) => {
-  try { ws.send(JSON.stringify({ type: 'status', state: lastStatus.state, detail: lastStatus.detail })); } catch (_) {}
+  const st = getStatus(ws.project);
+  try { ws.send(JSON.stringify({ type: 'status', state: st.state, detail: st.detail })); } catch (_) {}
+  ws.on('message', (data) => {
+    let msg; try { msg = JSON.parse(data.toString()); } catch (_) { return; }
+    if (msg && msg.type === 'subscribe' && projectExists(msg.project)) {
+      ws.project = msg.project;
+      const s = getStatus(msg.project);
+      try { ws.send(JSON.stringify({ type: 'status', state: s.state, detail: s.detail })); } catch (_) {}
+    }
+  });
 });
 
-function broadcast(obj) {
+function broadcastProject(slug, obj) {
   const msg = JSON.stringify(obj);
   for (const client of wss.clients) {
-    if (client.readyState === 1) {
+    if (client.readyState === 1 && client.project === slug) {
       try { client.send(msg); } catch (_) {}
     }
   }
 }
 
 server.listen(PORT, HOST, () => {
-  console.log(`Conjure listening on http://${HOST}:${PORT}  (model: ${MODEL})`);
+  console.log(`Conjure v2 listening on http://${HOST}:${PORT}  (model: ${MODEL}, gate: ${PASSPHRASE ? 'on' : 'OFF'})`);
 });

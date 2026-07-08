@@ -1,4 +1,9 @@
 node_modules/
+.env
+# per-project generated workspaces (runtime-owned, kept out of git)
+workspace/projects/
+workspace/.trash/
+# legacy single-workspace layout (pre-v2)
 workspace/frames/*
 workspace/history/*
 workspace/app.html
