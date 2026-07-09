@@ -3,6 +3,11 @@
 Sketch a UI and watch it materialize as a working single-file web app in a live
 preview. Two input modes:
 
+> **About this project** — Conjure was built as a **group hackathon project** for the
+> **University of Pittsburgh TLI program**. It's a team effort;
+> the commit history reflects contributions from multiple members. Shared here for
+> demo, learning, and reference.
+
 - **Canvas** — draw with mouse/touch. A 4-color marker palette (black / red / blue /
   green) + eraser + clear, plus a text instruction box. "Build it" or auto-commit
   ~2.5s after the last stroke. Colors carry meaning (a red annotation reads as an
