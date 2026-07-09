@@ -974,6 +974,8 @@ app.get(['/welcome', '/home'], (req, res) => sendHome(res));
 
 // Public static assets for the homepage (e.g. /assets/hero.png), ungated.
 app.use('/assets', express.static(path.join(ROOT, 'site'), { maxAge: '1h' }));
+// Brand assets (favicons, logos) are public so the homepage + gate page show them.
+app.use('/brand', express.static(path.join(ROOT, 'public', 'brand'), { maxAge: '1h' }));
 
 // Bare domain: signed-in users get the app UI; visitors get the public homepage.
 app.get('/', (req, res) => {
