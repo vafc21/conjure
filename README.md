@@ -7,8 +7,8 @@ preview. Two input modes:
   green) + eraser + clear, plus a text instruction box. "Build it" or auto-commit
   ~2.5s after the last stroke. Colors carry meaning (a red annotation reads as an
   instruction). Phone-friendly.
-- **Camera** — point a webcam at paper. A cheap perceptual diff (64px grayscale)
-  detects when the drawing changes and holds still, then commits that frame.
+- **Add image** — drop a screenshot, logo, or mockup onto the markup (the `Image`
+  button). It's composited into what you send, so Conjure builds from your reference.
 
 Both modes can attach voice notes (Web Speech API, Chrome; degrades gracefully).
 
@@ -30,8 +30,8 @@ project in `history/`.
   it's asking about, and your answer auto-resubmits the same sketch.
 - **Concurrency** — a global 2-slot semaphore with per-project latest-wins queues,
   so multiple simultaneous demo users can't overload the box.
-- **Mobile flow** — first visit asks "Is your camera set up?"; after a build the app
-  goes fullscreen with a slim back-arrow bar. Touch targets ≥ 44px.
+- **Mobile flow** — a first-run tutorial walks new users through markup/build; after a
+  build the app goes fullscreen with a slim back-arrow bar. Touch targets ≥ 44px.
 - **Passphrase gate** — a signed httpOnly cookie (30 days) protects every route and
   the WebSocket upgrade.
 - **Quick-start demos** — one-click starter prompts (todo, dashboard, landing page,

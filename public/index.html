@@ -273,11 +273,6 @@
   <div class="body">
     <!-- ============ LEFT: CONTROLS ============ -->
     <section class="left">
-      <div class="tabs">
-        <button class="tab active" data-mode="markup">Markup</button>
-        <button class="tab" data-mode="camera">Camera</button>
-      </div>
-
       <!-- MARKUP MODE — draw directly on the live app in the preview -->
       <div class="pane active" data-pane="markup">
         <div class="card">
@@ -297,27 +292,6 @@
         </div>
       </div>
 
-      <!-- CAMERA MODE -->
-      <div class="pane" data-pane="camera">
-        <div class="card">
-          <div class="row" style="justify-content:space-between">
-            <button class="btn" id="camStart">Start camera</button>
-            <label class="switch"><input type="checkbox" id="autoCam" checked> auto‑commit on change</label>
-          </div>
-          <video id="video" playsinline muted autoplay style="margin-top:.6rem"></video>
-          <div class="diffbar"><div id="diffFill"></div></div>
-          <p class="hint" style="margin:.5rem 0 0">Point at your paper sketch. When the drawing changes and then holds still, Conjure commits it automatically.</p>
-        </div>
-        <div class="card">
-          <label class="fld" for="camNote">Note to attach to next capture (optional)</label>
-          <input type="text" id="camNote" placeholder="e.g. make the header blue">
-          <div class="row" style="margin-top:.6rem">
-            <button class="btn primary" id="camShoot">Capture now</button>
-            <button class="btn" id="voiceCam">Voice</button>
-          </div>
-          <div class="notes-queue" id="voiceQueueCam" style="margin-top:.5rem"></div>
-        </div>
-      </div>
     </section>
 
     <!-- ============ RIGHT: PREVIEW ============ -->
@@ -372,10 +346,12 @@
           <button class="btn tool" id="toolErase">Erase</button>
           <button class="btn tool ghost" id="toolUndo">Undo</button>
           <button class="btn tool ghost" id="toolClear">Clear</button>
+          <button class="btn tool" id="toolImage" title="Add an image to your markup (screenshot, logo, mockup)">Image</button>
           <span class="sep"></span>
           <input class="note" id="markNote" type="text" placeholder="note (optional)" aria-label="Note for this build">
           <button class="btn tool" id="voiceMarkup">Voice</button>
           <button class="btn primary" id="buildMarkupFloat" style="min-height:38px;padding:.45rem .8rem">Build ▸</button>
+          <input type="file" id="imgFile" accept="image/*" style="display:none">
         </span>
       </div>
 
@@ -460,7 +436,6 @@
   </div>
 </div>
 
-<canvas id="scratch" width="64" height="64" style="display:none"></canvas>
 
 <script src="/vendor/html2canvas.min.js"></script>
 <script>
@@ -895,22 +870,8 @@
       chip.appendChild(x); el.appendChild(chip);
     });
   }
-  var voiceCamStore=[];
   makeVoice($('voiceMarkup'), function(t){ var n=$('markNote'); n.value=(n.value?n.value+' ':'')+t; });
-  makeVoice($('voiceCam'), function(t){ voiceCamStore.push(t); renderQueue($('voiceQueueCam'),voiceCamStore); });
   makeVoice($('qVoice'), function(t){ $('qAnswer').value=($('qAnswer').value?$('qAnswer').value+' ':'')+t; });
-
-  // ---------------- tab switching ----------------
-  var tabs=document.querySelectorAll('.tab');
-  tabs.forEach(function(tab){
-    tab.addEventListener('click',function(){
-      tabs.forEach(function(t){t.classList.remove('active');});
-      tab.classList.add('active');
-      var mode=tab.getAttribute('data-mode');
-      document.querySelectorAll('.pane').forEach(function(p){ p.classList.toggle('active', p.getAttribute('data-pane')===mode); });
-      if(mode!=='camera') stopCamera();
-    });
-  });
 
   // ================= MARKUP MODE (draw directly on the live app) =================
   var overlay=$('inkOverlay'), octx=overlay.getContext('2d');
@@ -1079,47 +1040,27 @@
   }
   $('addPage').onclick=addPage;
 
-  // ================= CAMERA MODE =================
-  var video=$('video'), diffFill=$('diffFill');
-  var stream=null, camTimer=null, lastSmall=null, committedSmall=null, stableTicks=0;
-  var SMALL=64, CHANGE_THRESHOLD=14, STABLE_NEEDED=2;
-  function startCamera(){
-    if(stream) return;
-    navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1280}, height:{ideal:960} }, audio:false })
-      .then(function(s){ stream=s; video.srcObject=s; video.play(); $('camStart').textContent='Stop camera'; camTimer=setInterval(tick,2000); })
-      .catch(function(err){ setState('error','Camera blocked',String(err.message||err)); });
-  }
-  function stopCamera(){
-    if(camTimer){ clearInterval(camTimer); camTimer=null; }
-    if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; }
-    $('camStart').textContent='Start camera'; lastSmall=null; committedSmall=null; stableTicks=0; diffFill.style.width='0%';
-  }
-  $('camStart').onclick=function(){ stream?stopCamera():startCamera(); };
-  function grabSmall(){
-    if(!video.videoWidth) return null;
-    var sc=$('scratch'), g=sc.getContext('2d'); g.drawImage(video,0,0,SMALL,SMALL);
-    var d=g.getImageData(0,0,SMALL,SMALL).data, gray=new Float32Array(SMALL*SMALL);
-    for(var i=0,j=0;i<d.length;i+=4,j++){ gray[j]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; }
-    return gray;
-  }
-  function meanDiff(a,b){ if(!a||!b) return 999; var s=0; for(var i=0;i<a.length;i++){ s+=Math.abs(a[i]-b[i]); } return s/a.length; }
-  function tick(){
-    if(sending) return;
-    var small=grabSmall(); if(!small) return;
-    var vsLast=meanDiff(small,lastSmall), vsCommitted=meanDiff(small,committedSmall);
-    lastSmall=small; diffFill.style.width=Math.min(100,(vsCommitted/40)*100)+'%';
-    var changed=vsCommitted>CHANGE_THRESHOLD, still=vsLast<CHANGE_THRESHOLD/2;
-    if(changed&&still){ stableTicks++; } else { stableTicks=0; }
-    if(changed && stableTicks>=STABLE_NEEDED && $('autoCam').checked){ committedSmall=small; stableTicks=0; captureFrame(); }
-  }
-  function collectCamNotes(){ var notes=[]; var t=$('camNote').value.trim(); if(t) notes.push(t); voiceCamStore.forEach(function(v){notes.push(v);}); return notes; }
-  function captureFrame(){
-    var c=document.createElement('canvas'); c.width=video.videoWidth||1280; c.height=video.videoHeight||960;
-    c.getContext('2d').drawImage(video,0,0,c.width,c.height);
-    commit(c.toDataURL('image/png'),collectCamNotes());
-    $('camNote').value=''; voiceCamStore.length=0; renderQueue($('voiceQueueCam'),voiceCamStore);
-  }
-  $('camShoot').onclick=function(){ if(!stream){ startCamera(); setTimeout(captureFrame,1200); return; } committedSmall=grabSmall(); captureFrame(); };
+  // ---------------- add image to markup ----------------
+  var imgFile=$('imgFile');
+  if($('toolImage')) $('toolImage').onclick=function(){ if(imgFile) imgFile.click(); };
+  if(imgFile) imgFile.onchange=function(e){
+    var f=e.target.files && e.target.files[0]; if(!f) return;
+    if(!/^image\//.test(f.type||'')){ showToast('That file is not an image', true); imgFile.value=''; return; }
+    var url=URL.createObjectURL(f), im=new Image();
+    im.onload=function(){
+      if(!markupOn) setMarkup(true); else sizeOverlay();
+      var fr=document.querySelector('.frame'); var W=fr.clientWidth, H=fr.clientHeight;
+      var s=Math.min(W*0.6/im.naturalWidth, H*0.6/im.naturalHeight, 1);
+      var w=Math.max(1,Math.round(im.naturalWidth*s)), h=Math.max(1,Math.round(im.naturalHeight*s));
+      pushUndo();
+      octx.globalCompositeOperation='source-over';
+      octx.drawImage(im,(W-w)/2,(H-h)/2,w,h);
+      URL.revokeObjectURL(url); imgFile.value='';
+      showToast('Image added — point at it or note what to do, then Build');
+    };
+    im.onerror=function(){ URL.revokeObjectURL(url); imgFile.value=''; showToast('Could not load that image', true); };
+    im.src=url;
+  };
 
   // ---------------- export / open ----------------
   $('exportBtn').onclick=function(){ var a=document.createElement('a'); a.href=api('app.html')+'?project='+encodeURIComponent(currentProject)+'&uid='+encodeURIComponent(UID); a.download='app.html'; a.click(); };
@@ -1130,7 +1071,7 @@
   var TUT_STEPS = [
     { ico: ICO('<path d="M4 20l3.5-1L18 8.5 15.5 6 5 16.5 4 20z"/><path d="M14 7l3 3"/>'),
       title: 'Welcome to Conjure',
-      html: 'Draw a UI and Conjure builds it into a real, working web app — live. You can sketch on paper through your camera, or draw right on the app in the preview.' },
+      html: 'Draw a UI and Conjure builds it into a real, working web app — live. Draw right on your app in the preview, or drop in a reference image and annotate it.' },
     { ico: ICO('<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M6 14c2-4 3.5 3 5.5-1s3 2 5.5-2"/>'),
       title: 'Draw on your app',
       html: 'Tap <span class="kbd">✎ Markup</span> above the preview, then draw your edits straight onto the app: circle what to change, cross out (<span class="kbd">✗</span>) to delete, add arrows, or write a label. Colours carry meaning.' },
@@ -1146,9 +1087,9 @@
     { ico: ICO('<rect x="8" y="7" width="12" height="14" rx="2"/><path d="M5 17V5a2 2 0 0 1 2-2h8"/>'),
       title: 'Add pages',
       html: 'Use <span class="kbd">+ Page</span> to add pages to your site. They’re linked in the navigation automatically, and every edit applies to the page you’re viewing (shown as “on: …”).' },
-    { ico: ICO('<rect x="3" y="7" width="18" height="12" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M8 7l1.4-2h5.2L16 7"/>'),
-      title: 'Camera & projects',
-      html: 'Prefer paper? Switch to the <span class="kbd">Camera</span> tab and point at a sketch. Create, rename and switch projects from the top bar. That’s it — start making.' },
+    { ico: ICO('<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 15l3.5-4 2.5 3 2-2.5L19 15"/><circle cx="8.5" cy="8.5" r="1.4"/>'),
+      title: 'Add images & pages',
+      html: 'Drop in a reference with <span class="kbd">Image</span> in the markup bar — a screenshot, logo, or mockup — then annotate it. Add pages with <span class="kbd">+ Page</span>, and create or switch projects from the top bar.' },
   ];
   var tutIdx=0;
   function renderTut(){
@@ -1185,8 +1126,7 @@
     if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){
       e.preventDefault();
       if(sending) return;
-      if(document.querySelector('.pane[data-pane=markup].active')) buildFromMarkup();
-      else if(document.querySelector('.pane[data-pane=camera].active')&&stream) captureFrame();
+      buildFromMarkup();
     }
   });
 
