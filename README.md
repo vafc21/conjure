@@ -5,10 +5,24 @@ preview.** Draw a rough layout (or drop in a screenshot), add a note or two, and
 Conjure uses the Claude Code CLI to build — and then incrementally edit — a real,
 self-contained `app.html` in the pane next to your canvas.
 
+**Why Conjure?** → See [BACKSTORY.md](BACKSTORY.md) for the hackathon origin story and what we learned.
+
+![Conjure — "Draw your app into being."](docs/media/conjure-hero.png)
+
+*Sketch a UI on paper, on a canvas, or right on top of your running app — Conjure builds it into a real, working web app in seconds.*
+
 > **About this project** — Conjure was built as a **group hackathon project** for the
 > **University of Pittsburgh TLI program**. It's a team effort; the commit history
 > reflects contributions from multiple members. Shared here for demo, learning, and
 > reference. It runs entirely on your own machine against your own Claude account.
+
+## The team
+
+Conjure was built in a weekend by a student team in the Pitt TLI program — trading the canvas, the runtime prompt, and the deploy back and forth until "sketch → live app" worked end to end. The full story is in [BACKSTORY.md](BACKSTORY.md).
+
+![The Conjure team mid-build during the Pitt TLI hackathon](docs/media/team-hackathon.jpg)
+
+*Part of the team mid-build — laptops, cold coffee, and a lot of iterating on the live preview.*
 
 ## How it works
 
@@ -25,6 +39,10 @@ gracefully):
 The right pane is an iframe of the current project's generated app, hot-reloaded over a
 WebSocket. Export downloads the current app; timestamped copies are kept per project in
 `history/`.
+
+![The Conjure workspace — markup tools on the left, the live app on the right](docs/media/conjure-builder.png)
+
+*Two panes: starters and markup tools on the left, your live app hot-reloading on the right. Turn on **Markup**, draw your edits onto the app, hit **Build**.*
 
 ---
 
